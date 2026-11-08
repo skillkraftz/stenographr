@@ -1,0 +1,22 @@
+# models, envs, caches
+*.onnx
+*.tar.bz2
+models/
+.venv/
+venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+# media, transcripts, logs
+*.mp4
+*.mkv
+*.wav
+*.m4a
+*.mp3
+*.srt
+steno.log
+*.log
+transcripts/
+# local config
+config.toml
+.env
