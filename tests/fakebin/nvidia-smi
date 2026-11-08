@@ -1,0 +1,11 @@
+#!/bin/sh
+# Fake nvidia-smi. Prints "<free MiB>, <util %>" (what stenographr queries).
+#   FAKE_SMI       fixed answer (default "3500, 5")
+#   FAKE_SMI_SEQ   file with one answer per line; each call consumes the first line (per-file checks)
+#   FAKE_SMI_FAIL  =1: exit 1
+[ "$FAKE_SMI_FAIL" = 1 ] && { echo "NVIDIA-SMI has failed" >&2; exit 1; }
+if [ -n "$FAKE_SMI_SEQ" ] && [ -s "$FAKE_SMI_SEQ" ]; then
+  head -n1 "$FAKE_SMI_SEQ"; tail -n +2 "$FAKE_SMI_SEQ" > "$FAKE_SMI_SEQ.tmp"; mv "$FAKE_SMI_SEQ.tmp" "$FAKE_SMI_SEQ"
+else
+  echo "${FAKE_SMI:-3500, 5}"
+fi
