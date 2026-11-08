@@ -43,6 +43,13 @@ def probe_duration(video: Path) -> float:
         raise RuntimeError(f"ffprobe could not read {video.name}: {out.stderr.strip()[:300]}")
 
 
+def has_audio(video: Path) -> bool:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_name", "-of", "csv=p=0",
+         str(video)], capture_output=True, text=True)
+    return bool(out.stdout.strip())
+
+
 def extract_audio(video: Path) -> np.ndarray:
     """16 kHz mono float32, straight from ffmpeg's pipe (no temp file)."""
     p = subprocess.run(
@@ -65,13 +72,15 @@ def time_of_day(start: dt.datetime, offset: float) -> str:
 
 
 def render_md(video: Path, start: dt.datetime, duration: float, engine: str, device: str,
-              segments: list[dict], now: dt.datetime) -> str:
+              segments: list[dict], now: dt.datetime, note: str | None = None) -> str:
     lines = [
         f"# {video.stem} · recorded {start:%Y-%m-%d %H:%M} · {hms(duration)}",
         f"source: {video}",
         f"engine: {engine} ({device}) · transcribed {now:%Y-%m-%d %H:%M}",
         "",
     ]
+    if note:                          # e.g. "(no audio)": still a transcript, so callers don't retry forever
+        lines.append(note)
     for s in segments:
         lines.append(f"[{hms(s['start'])} → {hms(s['end'])} | {time_of_day(start, s['start'])}] {s['text']}")
     return "\n".join(lines) + "\n"
@@ -97,7 +106,3 @@ def write_exclusive(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "x", encoding="utf-8") as f:
         f.write(text)
-
-
-def archive_stem(start: dt.datetime) -> str:
-    return f"clip-{start:%Y-%m-%d-%H%M%S}"

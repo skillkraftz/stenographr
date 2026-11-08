@@ -18,7 +18,7 @@ bad() { fail=$((fail+1)); echo "  FAIL $1"; }
 check() { if eval "$2"; then ok "$1"; else bad "$1   [$2]"; fi; }
 mkconf() { printf '[paths]\narchive = "%s"\nmodels = "%s/models"\n[engine]\nname = "fake"\n[device]\nvram_need_mib = 2000\nvram_margin_mib = 500\nmax_gpu_util_pct = 30\nbusy_processes = ["steno-test-busy"]\n%s\n' "$A" "$W" "$1" > "$W/config.toml"; }
 steno() { "$PY" -m stenographr.cli "$@"; }
-fresh() { rm -rf "$A" "$OUT"; : > "$W/rc"; unset FAKE_SMI FAKE_SMI_FAIL FAKE_ENGINE_FAIL_GPU FAKE_ENGINE_GPU FAKE_FF_FAIL; export FAKE_SMI_SEQ=; }
+fresh() { rm -rf "$A" "$OUT"; : > "$W/rc"; unset FAKE_SMI FAKE_SMI_FAIL FAKE_ENGINE_FAIL_GPU FAKE_ENGINE_GPU FAKE_FF_FAIL FAKE_FF_NOAUDIO; export FAKE_SMI_SEQ=; }
 mkconf ""
 mkvid() { mkdir -p "$W/v"; : > "$W/v/$1"; echo "$W/v/$1"; }   # contents don't matter: ffmpeg/ffprobe are fakes
 dev_of() { grep -o 'device: [a-z]* (.*)' "$LOG" | head -n${1:-1} | tail -n1; }
@@ -41,7 +41,7 @@ cat > "$W/exp-seg" <<'EOF'
 [00:00:10 → 00:00:12 | 06:38:30] hello world
 EOF
 check "segment lines exact"     'diff <(sed -n "5,\$p" "$M") "$W/exp-seg"'
-check "archive copy identical"  'cmp -s "$M" "$A/clips/clip-2026-11-08-063820.md"'
+check "archive copy identical"  'cmp -s "$M" "$A/clips/2026-11-08/20261108_063820.md"'
 
 echo "== time of day math"
 check "offset math incl. hour/midnight wrap" '"$PY" - <<EOF
@@ -63,7 +63,7 @@ steno clip "$V" --out "$OUT" --device cpu >/dev/null
 echo "x" >> "$OUT/20261108_063820.md"; BEFORE=$(cat "$OUT/20261108_063820.md")
 steno clip "$V" --out "$OUT" --device cpu >"$W/o2" 2>"$W/e2"; echo $? > "$W/rc"
 check "second run: exit 1, nothing new written" '[[ $(cat "$W/rc") == 1 && $(find "$OUT" "$A/clips" -type f | wc -l) == 2 && $(cat "$OUT/20261108_063820.md") == "$BEFORE" ]]'
-check "refusal names both paths and the exact rm" 'grep -qxF "stenographr: 20261108_063820.mp4: already transcribed ($OUT/20261108_063820.md and $A/clips/clip-2026-11-08-063820.md); to redo it: rm '"'$OUT/20261108_063820.md' '$A/clips/clip-2026-11-08-063820.md'"'" "$W/e2"'
+check "refusal names both paths and the exact rm" 'grep -qxF "stenographr: 20261108_063820.mp4: already transcribed ($OUT/20261108_063820.md and $A/clips/2026-11-08/20261108_063820.md); to redo it: rm '"'$OUT/20261108_063820.md' '$A/clips/2026-11-08/20261108_063820.md'"'" "$W/e2"'
 check "refusal logged, nothing on stdout" 'grep -q "WARN  20261108_063820.mp4 refused: already transcribed" "$LOG" && [[ ! -s $W/o2 ]]'
 eval "$(grep -o "rm '.*'" "$W/e2")"
 steno clip "$V" --out "$OUT" --device cpu >/dev/null; echo $? > "$W/rc"
@@ -77,13 +77,26 @@ steno clip "$V1" "$V2" "$V3" --out "$OUT" --device cpu >/dev/null 2>&1; echo $? 
 check "3 videos, 1 already done: other 2 written, exit 1" '[[ $(cat "$W/rc") == 1 && -f $OUT/20261108_063820.md && -f $OUT/20261108_081500.md && ! -e $OUT/20261108_070641-2.md ]]'
 fresh; steno clip "$V1" --out "$OUT" --device cpu >/dev/null; rm "$OUT/20261108_063820.md"
 steno clip "$V1" --out "$OUT" --device cpu >/dev/null 2>"$W/e2"; echo $? > "$W/rc"
-check "archive copy alone also triggers a refusal" '[[ $(cat "$W/rc") == 1 && ! -e $OUT/20261108_063820.md && $(ls "$A/clips" | wc -l) == 1 ]] && grep -q "already transcribed" "$W/e2" && grep -q "rm .*clip-2026-11-08-063820.md" "$W/e2"'
+check "archive copy alone also triggers a refusal" '[[ $(cat "$W/rc") == 1 && ! -e $OUT/20261108_063820.md && $(find "$A/clips" -type f | wc -l) == 1 ]] && grep -q "already transcribed" "$W/e2" && grep -q "rm .*/2026-11-08/20261108_063820.md" "$W/e2"'
 fresh; mkdir -p "$OUT"; echo precious > "$OUT/20261108_063820.md"
 steno clip "$V1" --out "$OUT" --device cpu >/dev/null 2>&1
 check "existing .md beside the video is untouched, no -2" '[[ $(cat "$OUT/20261108_063820.md") == precious && ! -e $OUT/20261108_063820-2.md && ! -e $A/clips ]]'
 fresh; V1=$(mkvid 20261108_063820.mp4)
 steno clip "$V1" >/dev/null
-check "no --out: .md lands next to the video" '[[ -f $W/v/20261108_063820.md && -f $A/clips/clip-2026-11-08-063820.md ]]'
+check "no --out: .md lands next to the video" '[[ -f $W/v/20261108_063820.md && -f $A/clips/2026-11-08/20261108_063820.md ]]'
+
+echo "== archive layout and same-second names"
+fresh; VA=$(mkvid 20250101_120000.mp4); VB=$(mkvid 20250101_120000_001.mp4)
+steno clip "$VA" "$VB" --out "$OUT" --device cpu >/dev/null 2>&1; echo $? > "$W/rc"
+check "same-second pair: both transcribed, exit 0" '[[ $(cat "$W/rc") == 0 && -f $OUT/20250101_120000.md && -f $OUT/20250101_120000_001.md ]]'
+check "archive: <date>/<source stem>.md, distinct files" '[[ $(find "$A/clips" -type f | wc -l) == 2 ]] && head -1 "$A/clips/2025-01-01/20250101_120000.md" | grep -q "^# 20250101_120000 " && head -1 "$A/clips/2025-01-01/20250101_120000_001.md" | grep -q "^# 20250101_120000_001 "'
+echo "== no audio stream"
+fresh; VN=$(mkvid 20250102_080000.mp4)
+FAKE_FF_NOAUDIO=1 steno clip "$VN" --out "$OUT" --device cpu >/dev/null 2>&1; echo $? > "$W/rc"
+check "no audio: exit 0, .md has header and (no audio) only" '[[ $(cat "$W/rc") == 0 && $(sed -n 5,\$p "$OUT/20250102_080000.md") == "(no audio)" && $(head -1 "$OUT/20250102_080000.md") == "# 20250102_080000 · recorded 2025-01-02 08:00 · 00:25:15" ]]'
+check "same placeholder in the archive, logged as INFO" 'cmp -s "$OUT/20250102_080000.md" "$A/clips/2025-01-02/20250102_080000.md" && grep -q "INFO  20250102_080000.mp4 finish: no audio" "$LOG"'
+FAKE_FF_NOAUDIO=1 steno clip "$VN" --out "$OUT" --device cpu >/dev/null 2>&1; echo $? > "$W/rc"
+check "second run refuses it" '[[ $(cat "$W/rc") == 1 ]] && grep -q "refused: already transcribed" "$LOG"'
 
 echo "== model loaded once per run"
 fresh; V1=$(mkvid 20261108_063820.mp4); V2=$(mkvid 20261108_070641.mp4); V3=$(mkvid 20261108_081500.mp4)

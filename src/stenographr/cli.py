@@ -42,7 +42,7 @@ def _q(path) -> str:
 
 
 def _targets(video: Path, out_dir: Path, start: dt.datetime, cfg) -> list[Path]:
-    return [out_dir / f"{video.stem}.md", cfg.archive / "clips" / f"{clipmod.archive_stem(start)}.md"]
+    return [out_dir / f"{video.stem}.md", cfg.archive / "clips" / f"{start:%Y-%m-%d}" / f"{video.stem}.md"]
 
 
 def _transcribe_one(cfg, log: Log, engines: Engines, video: Path, out_dir: Path, requested: str,
@@ -50,6 +50,14 @@ def _transcribe_one(cfg, log: Log, engines: Engines, video: Path, out_dir: Path,
     name = video.name
     log.info(name, f"start: engine={cfg.engine}")
     duration = clipmod.probe_duration(video)
+    if not clipmod.has_audio(video):
+        md = clipmod.render_md(video, start, duration, cfg.engine, "none", [], dt.datetime.now(), note="(no audio)")
+        p1, p2 = _targets(video, out_dir, start, cfg)
+        clipmod.write_exclusive(p1, md)
+        clipmod.write_exclusive(p2, md)
+        log.info(name, f"finish: no audio stream, wrote placeholder {p1} and {p2}")
+        print(p1)
+        return
     audio = clipmod.extract_audio(video)
 
     decision = devmod.decide(cfg, requested, gpu_runtime_available(cfg.engine))
