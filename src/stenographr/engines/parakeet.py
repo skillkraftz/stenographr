@@ -15,7 +15,6 @@ from ..config import Config
 SR = 16000
 MODEL_DIR = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
 VAD_FILE = "silero_vad.onnx"
-BATCH = 8   # VAD segments decoded together
 
 
 def gpu_runtime_available() -> bool:
@@ -28,10 +27,29 @@ def gpu_runtime_available() -> bool:
         any(d.glob("libonnxruntime_providers_cuda*")) for d in libs if d.is_dir())
 
 
+def _preload_cuda_libs() -> None:
+    """pip's nvidia-* wheels put CUDA/cuDNN in site-packages/nvidia/*/lib, which the dynamic loader
+    does not search. Load them by hand (before sherpa-onnx's CUDA provider is) so that neither
+    LD_LIBRARY_PATH nor an activated venv is needed."""
+    import ctypes
+    import importlib.util
+    spec = importlib.util.find_spec("nvidia")
+    for stem in ("libcudart", "libnvrtc", "libnvJitLink", "libcublasLt", "libcublas",
+                 "libcufft", "libcurand", "libcudnn"):
+        for base in (spec.submodule_search_locations if spec else []):
+            for f in sorted(Path(base).glob(f"*/lib/{stem}.so.*")):
+                try:
+                    ctypes.CDLL(str(f), mode=ctypes.RTLD_GLOBAL)
+                except OSError:
+                    pass
+
+
 class ParakeetEngine:
     name = "parakeet-tdt-0.6b-v2-int8"
 
     def __init__(self, cfg: Config, device: str):
+        if device == "gpu":
+            _preload_cuda_libs()
         import sherpa_onnx
         self._s = sherpa_onnx
         m = Path(cfg.models) / MODEL_DIR
@@ -41,6 +59,7 @@ class ParakeetEngine:
             if not f.is_file():
                 raise FileNotFoundError(f"model file missing: {f}")
         self.vad_model = str(vad)
+        self.batch = cfg.batch_size if cfg.batch_size > 0 else (1 if device == "gpu" else 8)
         self.rec = sherpa_onnx.OfflineRecognizer.from_transducer(
             encoder=str(m / "encoder.int8.onnx"),
             decoder=str(m / "decoder.int8.onnx"),
@@ -83,8 +102,8 @@ class ParakeetEngine:
     def transcribe(self, audio: np.ndarray) -> list[dict]:
         segs = self._vad_segments(audio.astype(np.float32, copy=False))
         out = []
-        for i in range(0, len(segs), BATCH):
-            batch = segs[i:i + BATCH]
+        for i in range(0, len(segs), self.batch):
+            batch = segs[i:i + self.batch]
             streams = []
             for _, samples in batch:
                 st = self.rec.create_stream()

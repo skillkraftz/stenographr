@@ -16,7 +16,7 @@ pass=0 fail=0
 ok()  { pass=$((pass+1)); echo "  ok   $1"; }
 bad() { fail=$((fail+1)); echo "  FAIL $1"; }
 check() { if eval "$2"; then ok "$1"; else bad "$1   [$2]"; fi; }
-mkconf() { printf '[paths]\narchive = "%s"\nmodels = "%s/models"\n[engine]\nname = "fake"\n[device]\nbusy_processes = ["steno-test-busy"]\n%s\n' "$A" "$W" "$1" > "$W/config.toml"; }
+mkconf() { printf '[paths]\narchive = "%s"\nmodels = "%s/models"\n[engine]\nname = "fake"\n[device]\nvram_need_mib = 2000\nvram_margin_mib = 500\nmax_gpu_util_pct = 30\nbusy_processes = ["steno-test-busy"]\n%s\n' "$A" "$W" "$1" > "$W/config.toml"; }
 steno() { "$PY" -m stenographr.cli "$@"; }
 fresh() { rm -rf "$A" "$OUT"; : > "$W/rc"; unset FAKE_SMI FAKE_SMI_FAIL FAKE_ENGINE_FAIL_GPU FAKE_ENGINE_GPU FAKE_FF_FAIL; export FAKE_SMI_SEQ=; }
 mkconf ""

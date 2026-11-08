@@ -6,12 +6,24 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["sherpa-onnx>=1.12", "numpy"]
 
+[project.optional-dependencies]
+# CUDA 13 build of sherpa-onnx (+ the NVIDIA libs it needs, ~1.6 GB of wheels; no sudo, no system CUDA).
+# Install: uv tool install --editable ".[gpu]"   (the wheel is for CPython 3.12)
+gpu = [
+  "sherpa-onnx @ https://huggingface.co/csukuangfj2/sherpa-onnx-wheels/resolve/main/cuda/2.0.1/sherpa_onnx-2.0.1+cuda13.cudnn9.onnxruntime1.28.2-cp312-cp312-linux_x86_64.whl ; python_version == '3.12'",
+  "nvidia-cudnn-cu13", "nvidia-cublas", "nvidia-cuda-runtime", "nvidia-cufft", "nvidia-curand",
+  "nvidia-cuda-nvrtc", "nvidia-nvjitlink",
+]
+
 [project.scripts]
 stenographr = "stenographr.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/stenographr"]
