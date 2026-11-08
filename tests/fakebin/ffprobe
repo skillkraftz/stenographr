@@ -1,0 +1,2 @@
+#!/bin/sh
+echo "${FAKE_FF_DURATION:-1515.647467}"

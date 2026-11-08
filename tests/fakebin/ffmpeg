@@ -1,0 +1,4 @@
+#!/bin/sh
+# Fake ffmpeg: FAKE_FF_SECONDS (default 12) of silent 16 kHz mono f32le on stdout.
+[ "$FAKE_FF_FAIL" = 1 ] && { echo "fake ffmpeg: Invalid data" >&2; exit 1; }
+head -c $(( ${FAKE_FF_SECONDS:-12} * 16000 * 4 )) /dev/zero
