@@ -22,7 +22,8 @@ New checks must fail on the code they guard.
 
 ## Rules
 - Tests never need a model, a GPU, the network, `/data`, or the user's real config/archive.
-- Never overwrite an output file; add `-2`, `-3`.
+- One transcript per source file: `clip` refuses a video whose `<out>/<stem>.md` or archive copy already exists (prints the `rm` to redo it, exit 1) and never overwrites or adds `-2`. (`srt` still uses `-2`, `-3` for now.)
+- Load the engine once per device per run (`Engines` in `cli.py`), never per file.
 - Read-only on `/data` except explicit benchmark outputs (which go to `/tmp/stenographr-bench`).
 - Do not modify phone-dock.
 - Engine and model are chosen in config; don't hardcode Parakeet outside its engine module.

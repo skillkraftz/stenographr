@@ -57,14 +57,43 @@ fresh; V=$(mkvid 20261108_235958.mp4)
 FAKE_ENGINE_SECONDS=5 steno clip "$V" --out "$OUT" --device cpu >/dev/null
 check "midnight crossing in file" 'grep -q "^\[00:00:05 → 00:00:10 | 00:00:03\]" "$OUT/20261108_235958.md" && grep -q "recorded 2026-11-08 23:59" "$OUT/20261108_235958.md"'
 
-echo "== never overwrite"
+echo "== one transcript per source file"
 fresh; V=$(mkvid 20261108_063820.mp4)
-for i in 1 2 3; do steno clip "$V" --out "$OUT" --device cpu >/dev/null; done
-check "out dir: .md, -2, -3"     '[[ -f $OUT/20261108_063820.md && -f $OUT/20261108_063820-2.md && -f $OUT/20261108_063820-3.md && ! -e $OUT/20261108_063820-4.md ]]'
-check "archive: .md, -2, -3"     '[[ -f $A/clips/clip-2026-11-08-063820.md && -f $A/clips/clip-2026-11-08-063820-2.md && -f $A/clips/clip-2026-11-08-063820-3.md ]]'
-fresh; mkdir -p "$OUT"; echo precious > "$OUT/20261108_063820.md"
 steno clip "$V" --out "$OUT" --device cpu >/dev/null
-check "existing file untouched"  '[[ $(cat "$OUT/20261108_063820.md") == precious && -f $OUT/20261108_063820-2.md ]]'
+echo "x" >> "$OUT/20261108_063820.md"; BEFORE=$(cat "$OUT/20261108_063820.md")
+steno clip "$V" --out "$OUT" --device cpu >"$W/o2" 2>"$W/e2"; echo $? > "$W/rc"
+check "second run: exit 1, nothing new written" '[[ $(cat "$W/rc") == 1 && $(find "$OUT" "$A/clips" -type f | wc -l) == 2 && $(cat "$OUT/20261108_063820.md") == "$BEFORE" ]]'
+check "refusal names both paths and the exact rm" 'grep -qxF "stenographr: 20261108_063820.mp4: already transcribed ($OUT/20261108_063820.md and $A/clips/clip-2026-11-08-063820.md); to redo it: rm '"'$OUT/20261108_063820.md' '$A/clips/clip-2026-11-08-063820.md'"'" "$W/e2"'
+check "refusal logged, nothing on stdout" 'grep -q "WARN  20261108_063820.mp4 refused: already transcribed" "$LOG" && [[ ! -s $W/o2 ]]'
+eval "$(grep -o "rm '.*'" "$W/e2")"
+steno clip "$V" --out "$OUT" --device cpu >/dev/null; echo $? > "$W/rc"
+check "after running the printed rm, it transcribes again" '[[ $(cat "$W/rc") == 0 && -f $OUT/20261108_063820.md ]]'
+fresh; mkdir -p "$W/sp"; : > "$W/sp/it's 20261108_063820.mp4"
+steno clip "$W/sp/it's 20261108_063820.mp4" --out "$OUT" --device cpu >/dev/null; steno clip "$W/sp/it's 20261108_063820.mp4" --out "$OUT" --device cpu 2>"$W/e2" >/dev/null
+check "rm line is shell-safe for odd names" 'grep -qF "rm '"'$OUT/it'\\\\''s 20261108_063820.md'"'" "$W/e2" && (. <(grep -o "rm .*" "$W/e2") && [[ ! -e "$OUT/it'"'"'s 20261108_063820.md" ]])'
+fresh; V1=$(mkvid 20261108_063820.mp4); V2=$(mkvid 20261108_070641.mp4); V3=$(mkvid 20261108_081500.mp4)
+steno clip "$V2" --out "$OUT" --device cpu >/dev/null
+steno clip "$V1" "$V2" "$V3" --out "$OUT" --device cpu >/dev/null 2>&1; echo $? > "$W/rc"
+check "3 videos, 1 already done: other 2 written, exit 1" '[[ $(cat "$W/rc") == 1 && -f $OUT/20261108_063820.md && -f $OUT/20261108_081500.md && ! -e $OUT/20261108_070641-2.md ]]'
+fresh; steno clip "$V1" --out "$OUT" --device cpu >/dev/null; rm "$OUT/20261108_063820.md"
+steno clip "$V1" --out "$OUT" --device cpu >/dev/null 2>"$W/e2"; echo $? > "$W/rc"
+check "archive copy alone also triggers a refusal" '[[ $(cat "$W/rc") == 1 && ! -e $OUT/20261108_063820.md && $(ls "$A/clips" | wc -l) == 1 ]] && grep -q "already transcribed" "$W/e2" && grep -q "rm .*clip-2026-11-08-063820.md" "$W/e2"'
+fresh; mkdir -p "$OUT"; echo precious > "$OUT/20261108_063820.md"
+steno clip "$V1" --out "$OUT" --device cpu >/dev/null 2>&1
+check "existing .md beside the video is untouched, no -2" '[[ $(cat "$OUT/20261108_063820.md") == precious && ! -e $OUT/20261108_063820-2.md && ! -e $A/clips ]]'
+fresh; V1=$(mkvid 20261108_063820.mp4)
+steno clip "$V1" >/dev/null
+check "no --out: .md lands next to the video" '[[ -f $W/v/20261108_063820.md && -f $A/clips/clip-2026-11-08-063820.md ]]'
+
+echo "== model loaded once per run"
+fresh; V1=$(mkvid 20261108_063820.mp4); V2=$(mkvid 20261108_070641.mp4); V3=$(mkvid 20261108_081500.mp4)
+export FAKE_ENGINE_COUNT=$W/count; : > "$FAKE_ENGINE_COUNT"
+steno clip "$V1" "$V2" "$V3" --out "$OUT" --device cpu >/dev/null
+check "3 videos: engine built once" '[[ $(grep -c . "$FAKE_ENGINE_COUNT") == 1 ]] && [[ $(grep -c "engine loaded" "$LOG") == 1 ]] && [[ $(grep -c "timing:" "$LOG") == 3 ]]'
+fresh; : > "$FAKE_ENGINE_COUNT"
+FAKE_ENGINE_FAIL_GPU=1 steno clip "$V1" "$V2" "$V3" --out "$OUT" >/dev/null; echo $? > "$W/rc"
+check "GPU fails: all 3 done on CPU, one GPU attempt + one CPU engine" '[[ $(cat "$W/rc") == 0 && $(ls "$OUT" | wc -l) == 3 && $(grep -c . "$FAKE_ENGINE_COUNT") == 2 ]] && [[ $(grep -c "^cpu$" "$FAKE_ENGINE_COUNT") == 1 ]] && grep -q "(cpu) ·" "$OUT/20261108_081500.md"'
+unset FAKE_ENGINE_COUNT
 
 echo "== recording start fallback order"
 fresh

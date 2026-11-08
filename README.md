@@ -23,12 +23,15 @@ curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherp
 ## Use
 
 ```sh
-stenographr clip VIDEO... --out DIR [--recorded-at "YYYY-MM-DD HH:MM"] [--device cpu|gpu|auto]
+stenographr clip VIDEO... [--out DIR] [--recorded-at "YYYY-MM-DD HH:MM"] [--device cpu|gpu|auto]
 stenographr srt FILE.md               # writes FILE.srt next to it (never automatic)
 ```
 
-`clip` writes `DIR/<basename>.md` and a copy at `<archive>/clips/clip-YYYY-MM-DD-HHMMSS.md`.
-Existing files are never overwritten (`-2`, `-3`, ...). Format:
+`clip` writes `DIR/<basename>.md` (default `DIR`: the video's own folder) and a copy at
+`<archive>/clips/clip-YYYY-MM-DD-HHMMSS.md`. A source file gets at most one transcript: if either file already
+exists, that video is refused (the message gives the `rm` command to redo it), the other videos still run, and the
+exit code is 1. Nothing is ever overwritten. The model is loaded once per run, however many videos are given.
+(`srt` still adds `-2`, `-3` for now.) Format:
 
 ```
 # 20261108_063820 · recorded 2026-11-08 06:38 · 00:25:15
