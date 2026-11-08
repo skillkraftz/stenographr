@@ -106,3 +106,10 @@ def write_exclusive(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "x", encoding="utf-8") as f:
         f.write(text)
+
+
+def archive_name(video: Path, start: dt.datetime, how: str) -> str:
+    """Flat archive file name: clip-<recording start><suffix>.md. For a Samsung name the suffix is whatever
+    follows the timestamp (so 20251127_155055_001 stays distinct); otherwise "-" + the full stem."""
+    suffix = video.stem[15:] if how == "file name" else "-" + video.stem
+    return f"clip-{start:%Y-%m-%d-%H%M%S}{suffix}.md"

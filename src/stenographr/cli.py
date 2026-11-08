@@ -41,8 +41,8 @@ def _q(path) -> str:
     return "'" + str(path).replace("'", "'\\''") + "'"
 
 
-def _targets(video: Path, out_dir: Path, start: dt.datetime, cfg) -> list[Path]:
-    return [out_dir / f"{video.stem}.md", cfg.archive / "clips" / f"{start:%Y-%m-%d}" / f"{video.stem}.md"]
+def _targets(video: Path, out_dir: Path, start: dt.datetime, how: str, cfg) -> list[Path]:
+    return [out_dir / f"{video.stem}.md", cfg.archive / "clips" / clipmod.archive_name(video, start, how)]
 
 
 def _transcribe_one(cfg, log: Log, engines: Engines, video: Path, out_dir: Path, requested: str,
@@ -52,7 +52,7 @@ def _transcribe_one(cfg, log: Log, engines: Engines, video: Path, out_dir: Path,
     duration = clipmod.probe_duration(video)
     if not clipmod.has_audio(video):
         md = clipmod.render_md(video, start, duration, cfg.engine, "none", [], dt.datetime.now(), note="(no audio)")
-        p1, p2 = _targets(video, out_dir, start, cfg)
+        p1, p2 = _targets(video, out_dir, start, how, cfg)
         clipmod.write_exclusive(p1, md)
         clipmod.write_exclusive(p2, md)
         log.info(name, f"finish: no audio stream, wrote placeholder {p1} and {p2}")
@@ -83,7 +83,7 @@ def _transcribe_one(cfg, log: Log, engines: Engines, video: Path, out_dir: Path,
                    f"rtf={run / audio_s if audio_s else 0:.4f}")
 
     md = clipmod.render_md(video, start, duration, cfg.engine, device, segments, dt.datetime.now())
-    p1, p2 = _targets(video, out_dir, start, cfg)
+    p1, p2 = _targets(video, out_dir, start, how, cfg)
     clipmod.write_exclusive(p1, md)
     clipmod.write_exclusive(p2, md)
     log.info(name, f"finish: {len(segments)} segments, recording start from {how}; wrote {p1} and {p2}")
@@ -102,7 +102,7 @@ def cmd_clip(args) -> int:
                 raise FileNotFoundError(f"no such file: {video}")
             out_dir = Path(args.out).absolute() if args.out else video.absolute().parent
             start, how = clipmod.recording_start(video, args.recorded_at)
-            have = [p for p in _targets(video, out_dir, start, cfg) if os.path.lexists(p)]
+            have = [p for p in _targets(video, out_dir, start, how, cfg) if os.path.lexists(p)]
             if have:                                  # one transcript per source file: refuse, say how to redo
                 failed += 1
                 rm = "rm " + " ".join(_q(p) for p in have)

@@ -22,7 +22,7 @@ New checks must fail on the code they guard.
 
 ## Rules
 - Tests never need a model, a GPU, the network, `/data`, or the user's real config/archive.
-- One transcript per source file: `clip` refuses a video whose `<out>/<stem>.md` or archive copy (`<archive>/clips/<date>/<stem>.md`) already exists (prints the `rm` to redo it, exit 1) and never overwrites or adds `-2`. A video with no audio stream gets a normal `.md` whose body is `(no audio)`, so callers never retry it. (`srt` still uses `-2`, `-3` for now.)
+- One transcript per source file: `clip` refuses a video whose `<out>/<stem>.md` or archive copy (flat `<archive>/clips/clip-YYYY-MM-DD-HHMMSS<suffix>.md`, see `archive_name`; never subfolders) already exists (prints the `rm` to redo it, exit 1) and never overwrites or adds `-2`. A video with no audio stream gets a normal `.md` whose body is `(no audio)`, so callers never retry it. (`srt` still uses `-2`, `-3` for now.)
 - Load the engine once per device per run (`Engines` in `cli.py`), never per file.
 - Read-only on `/data` except explicit benchmark outputs (which go to `/tmp/stenographr-bench`).
 - Do not modify phone-dock.

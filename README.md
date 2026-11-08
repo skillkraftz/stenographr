@@ -28,7 +28,9 @@ stenographr srt FILE.md               # writes FILE.srt next to it (never automa
 ```
 
 `clip` writes `DIR/<basename>.md` (default `DIR`: the video's own folder) and a copy at
-`<archive>/clips/<YYYY-MM-DD>/<basename>.md` (date = recording start). A source file gets at most one transcript: if either file already
+`<archive>/clips/clip-YYYY-MM-DD-HHMMSS<suffix>.md` (recording start; one flat folder, easy to prune by hand).
+For a Samsung name the suffix is whatever follows the timestamp (`20251127_155055_001.mp4` -> `clip-2025-11-27-155055_001.md`);
+for any other name it is `-` plus the stem (`some-talk.mp4` -> `clip-<date>-<time>-some-talk.md`). A source file gets at most one transcript: if either file already
 exists, that video is refused (the message gives the `rm` command to redo it), the other videos still run, and the
 exit code is 1. Nothing is ever overwritten. A video with no audio stream gets a normal `.md` whose only line is `(no audio)` (so it counts as done); one with audio but no speech gets the header and no lines. The model is loaded once per run, however many videos are given.
 (`srt` still adds `-2`, `-3` for now.) Format:
