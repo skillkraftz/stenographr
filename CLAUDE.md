@@ -1,5 +1,7 @@
 # stenographr
 
+Read SPEC.md before changing behaviour; update it when behaviour changes.
+
 Local speech-to-text (Python). Installed with `uv tool install --editable .` so `stenographr` is on PATH
 without activating a venv. Runs locally; no network at runtime (models are downloaded once, by hand).
 
@@ -10,9 +12,10 @@ without activating a venv. Runs locally; no network at runtime (models are downl
 | `src/stenographr/config.py` | Defaults + `~/.config/stenographr/config.toml` overrides |
 | `src/stenographr/engines/` | Engine interface (`transcribe(audio) -> segments`) and implementations |
 | `src/stenographr/device.py` | CPU/GPU choice, checked before each file |
-| `src/stenographr/clip.py` | ffmpeg extraction, .md writing, naming, recording-start logic |
-| `src/stenographr/srt.py` | .md -> .srt |
+| `src/stenographr/clip.py` | ffmpeg extraction, .txt writing, archive naming (`archive_rel`), manifest line, recording-start logic |
+| `src/stenographr/srt.py` | .txt -> .srt |
 | `src/stenographr/log.py` | `<archive>/steno.log` |
+| `SPEC.md` | The spec: layout, formats, what is built and what is open |
 | `tests/` | `run-tests.sh`; fakes in `tests/fakebin/` (nvidia-smi) and a fake engine |
 | `bench/` | Benchmark script (real data, outputs to /tmp only) |
 
@@ -22,10 +25,11 @@ New checks must fail on the code they guard.
 
 ## Rules
 - Tests never need a model, a GPU, the network, `/data`, or the user's real config/archive.
-- One transcript per source file: `clip` refuses a video whose `<out>/<stem>.md` or archive copy (flat `<archive>/clips/clip-YYYY-MM-DD-HHMMSS<suffix>.md`, see `archive_name`; never subfolders) already exists (prints the `rm` to redo it, exit 1) and never overwrites or adds `-2`. A video with no audio stream gets a normal `.md` whose body is `(no audio)`, so callers never retry it. (`srt` still uses `-2`, `-3` for now.)
+- Transcripts are `.txt`, never `.md`. One transcript per source file: `clip` refuses a video whose `<out>/<stem>.txt` or archive copy already exists (prints the `rm` to redo it, exit 1) and never overwrites or adds `-2`. Archive copy, flat folders: Samsung names `<archive>/clips/clip-YYYY-MM-DD-HHMMSS<suffix>.txt` (suffix = what follows the timestamp), anything else `<archive>/other/YYYY-MM-DD-<stem>.txt` (see `archive_rel`; never subfolders). A video with no audio stream gets a normal `.txt` whose body is `(no audio)`, so callers never retry it. (`srt` still uses `-2`, `-3` for now.)
+- Daily manifest `<archive>/steno-YYYY-MM-DD.txt` (date = today), append only: one line per file `clip` handled (success, `FAILED: see steno.log`, `refused: already transcribed`). A manifest write failure is logged and never fails the run.
 - Load the engine once per device per run (`Engines` in `cli.py`), never per file.
 - Read-only on `/data` except explicit benchmark outputs (which go to `/tmp/stenographr-bench`).
-- Do not modify phone-dock.
+- Do not modify phone-dock unless the task says so (then on its own branch in that repo).
 - Engine and model are chosen in config; don't hardcode Parakeet outside its engine module.
 - GPU: if enabling it needs sudo, a system CUDA install, or >~2 GB of downloads, stop and report.
 - Keep the repo publishable: no media, transcripts, logs, models, or personal paths/emails in files.

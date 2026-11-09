@@ -1,4 +1,4 @@
-"""Video -> audio -> segments -> .md (+ archive copy)."""
+"""Video -> audio -> segments -> .txt (+ archive copy)."""
 from __future__ import annotations
 
 import datetime as dt
@@ -14,14 +14,27 @@ SR = 16000
 _SAMSUNG = re.compile(r"^(\d{8})_(\d{6})(?!\d)")
 
 
+def samsung_start(name: str) -> dt.datetime | None:
+    """The recording start in a Samsung file name, or None (not that pattern, or an impossible date)."""
+    m = _SAMSUNG.match(name)
+    if not m:
+        return None
+    try:
+        return dt.datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+    except ValueError:
+        return None
+
+
+def kind(video: Path) -> str:
+    """'clip' for a phone (Samsung-named) video, 'other' for anything else."""
+    return "clip" if samsung_start(video.name) else "other"
+
+
 def recording_start(video: Path, recorded_at: str | None) -> tuple[dt.datetime, str]:
     """Samsung file name, else --recorded-at, else mtime. Returns (time, which one won)."""
-    m = _SAMSUNG.match(video.name)
-    if m:
-        try:
-            return dt.datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S"), "file name"
-        except ValueError:
-            pass                      # looks like one but isn't a real date: keep falling back
+    t = samsung_start(video.name)
+    if t:
+        return t, "file name"
     if recorded_at:
         s = recorded_at.strip().replace("T", " ")
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
@@ -71,7 +84,7 @@ def time_of_day(start: dt.datetime, offset: float) -> str:
     return (start + dt.timedelta(seconds=int(offset))).strftime("%H:%M:%S")
 
 
-def render_md(video: Path, start: dt.datetime, duration: float, engine: str, device: str,
+def render_text(video: Path, start: dt.datetime, duration: float, engine: str, device: str,
               segments: list[dict], now: dt.datetime, note: str | None = None) -> str:
     lines = [
         f"# {video.stem} · recorded {start:%Y-%m-%d %H:%M} · {hms(duration)}",
@@ -108,8 +121,16 @@ def write_exclusive(path: Path, text: str) -> None:
         f.write(text)
 
 
-def archive_name(video: Path, start: dt.datetime, how: str) -> str:
-    """Flat archive file name: clip-<recording start><suffix>.md. For a Samsung name the suffix is whatever
-    follows the timestamp (so 20251127_155055_001 stays distinct); otherwise "-" + the full stem."""
-    suffix = video.stem[15:] if how == "file name" else "-" + video.stem
-    return f"clip-{start:%Y-%m-%d-%H%M%S}{suffix}.md"
+def archive_rel(video: Path, start: dt.datetime, how: str) -> str:
+    """Archive path of the transcript, relative to the archive root; both folders are flat.
+      Samsung name: clips/clip-<recording start><suffix>.txt, suffix = whatever follows the timestamp
+                    (so 20251127_155055_001 stays distinct from 20251127_155055)
+      anything else: other/<YYYY-MM-DD of the recording start>-<stem>.txt"""
+    if how == "file name":
+        return f"clips/clip-{start:%Y-%m-%d-%H%M%S}{video.stem[15:]}.txt"
+    return f"other/{start:%Y-%m-%d}-{video.stem}.txt"
+
+
+def manifest_line(now: dt.datetime, kind_: str, stem: str, tail: str) -> str:
+    """One line of steno-YYYY-MM-DD.txt. `tail` is '→ <archive path>', '· FAILED: ...' or '· refused: ...'."""
+    return f"{kind_}: {now:%Y-%m-%d %H:%M:%S} · {stem} {tail}\n"
