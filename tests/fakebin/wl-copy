@@ -1,0 +1,3 @@
+#!/bin/sh
+# Fake wl-copy: the "clipboard" is the file $FAKE_CLIP.
+cat > "$FAKE_CLIP"

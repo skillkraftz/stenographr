@@ -63,6 +63,46 @@ engine: parakeet-tdt-0.6b-v2-int8 (gpu) · transcribed 2026-11-08 10:17
 The first two times are offsets into the video, the third is time of day. Recording start comes from a
 Samsung file name (`YYYYMMDD_HHMMSS`, any suffix), else `--recorded-at`, else the file's mtime.
 
+## Dictation
+
+Needs `pw-record`, `ydotool` (user service running), `wl-copy`; records from the PipeWire node `scarlett-mic`
+(see the audio section below), channel 1. Suggested aliases:
+
+```sh
+alias steno='stenographr notes'
+alias recall='stenographr recall'
+```
+
+- `stenographr toggle`: press once to start recording, again to stop. On stop it transcribes, copies the text to the
+  clipboard, types it at the cursor (ydotool), and adds a block to `<archive>/steno-YYYY-MM-DD.txt`. If typing
+  fails the text is still on the clipboard and in the daily file (the block ends `FAILED: typing failed`).
+- `stenographr notes` (`steno`): live in the terminal until Ctrl+C. Each sentence is printed, and appended at once
+  to `./steno-YYYY-MM-DD.txt` (header line `stenographr notes · <folder>` when the file is created) and to the
+  daily file. In a git repo it adds `steno-*.txt` to the repo's `.gitignore` if that isn't ignored yet.
+- `stenographr recall [N]` (`recall`): lists the last 10 dictations (type and notes, failed ones too); pick one and it
+  goes on the clipboard and is printed. `recall 2` copies number 2 directly; Enter or `q` copies nothing.
+
+Block format (details in [SPEC.md](SPEC.md)):
+
+```
+start: 2026-11-09 10:00:00 · type · unknown
+<text>
+end: 2026-11-09 10:00:42 · 42s · ok
+```
+
+The microphone and channel are in `[dictation]` of the config (`mic = "scarlett-mic"`, `channel = 1`).
+
+### Ctrl+` shortcut
+
+```sh
+stenographr keybinding install     # adds "stenographr dictation" = <Control>grave -> <path>/stenographr toggle
+stenographr keybinding remove      # removes only that entry
+```
+
+By hand: Settings > Keyboard > View and Customize Shortcuts > Custom Shortcuts > +, name "stenographr dictation",
+command = the output of `command -v stenographr` followed by ` toggle`, shortcut Ctrl+`. To undo, delete that entry
+there. Note it is a global shortcut, so it takes Ctrl+` away from apps that use it (e.g. editors' terminal toggle).
+
 ## Device selection
 
 Checked before each file with `--device auto`. The GPU is used only if `nvidia-smi` exists, a CUDA-enabled

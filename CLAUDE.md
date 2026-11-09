@@ -14,9 +14,15 @@ without activating a venv. Runs locally; no network at runtime (models are downl
 | `src/stenographr/device.py` | CPU/GPU choice, checked before each file |
 | `src/stenographr/clip.py` | ffmpeg extraction, .txt writing, archive naming (`archive_rel`), manifest line, recording-start logic |
 | `src/stenographr/srt.py` | .txt -> .srt |
+| `src/stenographr/runner.py` | `Engines` (one engine per device per run) and the CPU/GPU decision with GPU->CPU fallback |
+| `src/stenographr/daily.py` | Session blocks in the daily/notes files (writer) and their parser |
+| `src/stenographr/dictate.py` | `toggle` (type mode) and `notes` |
+| `src/stenographr/record.py` | Mic node check, `pw-record` command, channel pick |
+| `src/stenographr/recall.py` | `recall [N]` (read-only) |
+| `src/stenographr/keybind.py` | The GNOME Ctrl+` keybinding (touches only its own entry) |
 | `src/stenographr/log.py` | `<archive>/steno.log` |
 | `SPEC.md` | The spec: layout, formats, what is built and what is open |
-| `tests/` | `run-tests.sh`; fakes in `tests/fakebin/` (nvidia-smi) and a fake engine |
+| `tests/` | `run-tests.sh`; fakes in `tests/fakebin/` (nvidia-smi, ffmpeg, ffprobe, pw-record, pw-dump, ydotool, wl-copy, gsettings) and a fake engine |
 | `bench/` | Benchmark script (real data, outputs to /tmp only) |
 
 ## Tests
@@ -27,7 +33,8 @@ New checks must fail on the code they guard.
 - Tests never need a model, a GPU, the network, `/data`, or the user's real config/archive.
 - Transcripts are `.txt`, never `.md`. One transcript per source file: `clip` refuses a video whose `<out>/<stem>.txt` or archive copy already exists (prints the `rm` to redo it, exit 1) and never overwrites or adds `-2`. Archive copy, flat folders: Samsung names `<archive>/clips/clip-YYYY-MM-DD-HHMMSS<suffix>.txt` (suffix = what follows the timestamp), anything else `<archive>/other/YYYY-MM-DD-<stem>.txt` (see `archive_rel`; never subfolders). A video with no audio stream gets a normal `.txt` whose body is `(no audio)`, so callers never retry it. (`srt` still uses `-2`, `-3` for now.)
 - Daily manifest `<archive>/steno-YYYY-MM-DD.txt` (date = today), append only: one line per file `clip` handled (success, `FAILED: see steno.log`, `refused: already transcribed`). A manifest write failure is logged and never fails the run.
-- Load the engine once per device per run (`Engines` in `cli.py`), never per file.
+- Load the engine once per device per run (`Engines` in `runner.py`), never per file; `notes` loads it once per session.
+- Dictation: record only from the configured mic node (never fall back to another input); text typed by `toggle` is also put on the clipboard; `recall` only reads the daily files; the GNOME keybinding code never touches entries that aren't its own. Tests never touch the real GNOME settings, clipboard, ydotool or PipeWire (fakes on PATH).
 - Read-only on `/data` except explicit benchmark outputs (which go to `/tmp/stenographr-bench`).
 - Do not modify phone-dock unless the task says so (then on its own branch in that repo).
 - Engine and model are chosen in config; don't hardcode Parakeet outside its engine module.

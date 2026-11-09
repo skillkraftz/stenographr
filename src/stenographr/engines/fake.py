@@ -30,3 +30,36 @@ class FakeEngine:
             out.append({"start": t, "end": min(t + step, total), "text": words[i % len(words)]})
             t, i = t + step, i + 1
         return out
+
+    def stream(self):
+        return FakeStream()
+
+
+class FakeStream:
+    """One segment per FAKE_ENGINE_SECONDS of audio fed; flush() emits a remainder longer than 0.5 s."""
+
+    def __init__(self):
+        self.step = float(os.environ.get("FAKE_ENGINE_SECONDS", "5"))
+        self.words = os.environ.get("FAKE_ENGINE_TEXT", "hello world|second line").split("|")
+        self.have = 0          # samples fed and not yet emitted
+        self.t = 0.0
+        self.i = 0
+
+    def _emit(self, seconds: float) -> dict:
+        seg = {"start": self.t, "end": self.t + seconds, "text": self.words[self.i % len(self.words)]}
+        self.t += seconds
+        self.i += 1
+        return seg
+
+    def accept(self, audio: np.ndarray) -> list[dict]:
+        self.have += len(audio)
+        out = []
+        while self.have >= self.step * SR:
+            self.have -= int(self.step * SR)
+            out.append(self._emit(self.step))
+        return out
+
+    def flush(self) -> list[dict]:
+        out = [self._emit(self.have / SR)] if self.have > 0.5 * SR else []
+        self.have = 0
+        return out
