@@ -77,12 +77,18 @@ alias recall='stenographr recall'
   sentence at the cursor as you pause (sentence + a space). The second press finishes the last sentence, puts the
   whole session on the clipboard and ends the session. Everything is appended to the daily file as it is said.
 - `stenographr notes` (`steno`): live in the terminal until Ctrl+C. Each sentence is printed, and appended at once
-  to `./steno-YYYY-MM-DD.txt` (header line `stenographr notes · <folder>` when the file is created) and to the
-  daily file. In a git repo it adds `steno-*.txt` to the repo's `.gitignore` if that isn't ignored yet.
+  to the notes file and to the daily file. Inside a git repo the notes file is `<repo root>/steno/steno-YYYY-MM-DD.txt`
+  (and `steno/` is added to the repo's `.gitignore` if git isn't ignoring it yet); elsewhere it is
+  `./steno-YYYY-MM-DD.txt`. The header line `stenographr notes · <folder>` is written when the file is created.
 - `stenographr recall [N]` (`recall`): works on one daily file (today's, else the latest with anything in it). It
   prints `steno-DATE.txt: N pieces`, lists the newest 10 (sessions and clip/other lines), and asks which to copy: a
   number copies it, `a` lists all, Enter or `q` exits. `recall 2` copies piece 2 directly. A clip piece copies that
   transcript's text.
+
+Every type and notes session also keeps its audio: `<archive>/audio/YYYY-MM-DD-HHMMSS-<mode>.opus` (mono, 48 kHz, Opus
+96 kbps, about 0.7 MB per minute, encoded while recording so a crash still leaves it). The session's start line in the
+daily file points to it; its time zero is the text's time zero. If the audio can't be saved the session still runs and
+the start line says `audio: none`. Needs ffmpeg with libopus.
 
 Only the kept records carry times: each sentence line in the daily and notes files starts with `[HH:MM:SS]` (when it
 was said). The terminal output, typed text, clipboard and recall output never have them.
@@ -90,7 +96,7 @@ was said). The terminal output, typed text, clipboard and recall output never ha
 Block format (details in [SPEC.md](SPEC.md)):
 
 ```
-start: 2026-11-09 10:00:00 · type · unknown
+start: 2026-11-09 10:00:00 · type · unknown · audio/2026-11-09-100000-type.opus
 [10:00:03] <sentence>
 [10:00:09] <sentence>
 end: 2026-11-09 10:00:42 · 42s · ok

@@ -1,5 +1,15 @@
 #!/bin/sh
-# Fake ffmpeg: FAKE_FF_SECONDS (default 12) of silent 16 kHz mono f32le on stdout.
-[ "$FAKE_FF_NOAUDIO" = 1 ] && { echo "Output file does not contain any stream" >&2; exit 234; }
+# Fake ffmpeg, two uses:
+#  * the Opus encoder (args contain "libopus"): reads raw audio on stdin into the output file (the last argument),
+#    and logs "<args> | <bytes received>" to $FAKE_FF_ENC_LOG. FAKE_FF_ENC_FAIL=1: exit 1 at once.
+#  * clip extraction: FAKE_FF_SECONDS (default 12) of silent 16 kHz mono f32le on stdout (FAKE_FF_FAIL=1: error).
+for last; do :; done
+case " $* " in
+  *" libopus "*)
+    [ "$FAKE_FF_ENC_FAIL" = 1 ] && { echo "fake ffmpeg: $last: Permission denied" >&2; exit 1; }
+    cat > "$last"
+    echo "$* | $(wc -c < "$last")" >> "${FAKE_FF_ENC_LOG:-/dev/null}"
+    exit 0 ;;
+esac
 [ "$FAKE_FF_FAIL" = 1 ] && { echo "fake ffmpeg: Invalid data" >&2; exit 1; }
 head -c $(( ${FAKE_FF_SECONDS:-12} * 16000 * 4 )) /dev/zero

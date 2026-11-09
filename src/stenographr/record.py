@@ -7,7 +7,8 @@ from pathlib import Path
 
 import numpy as np
 
-SR = 16000
+SR = 16000            # what the model/VAD wants
+REC_RATE = 48000      # what we record at (decent voice quality for the kept audio)
 CHANNELS = 2          # scarlett-mic is stereo (AUX0/AUX1); the voice is on AUX0, so we record both and keep one
 
 
@@ -25,8 +26,8 @@ def mic_exists(name: str) -> bool:
 
 
 def recorder_cmd(mic: str, target: str) -> list[str]:
-    """Raw interleaved float32, 16 kHz, 2 channels, to `target` (a file, or '-' for stdout). --raw = no header."""
-    return ["pw-record", "--target", mic, "--rate", str(SR), "--channels", str(CHANNELS), "--format", "f32",
+    """Raw interleaved float32, 48 kHz, 2 channels, to `target` (a file, or '-' for stdout). --raw = no header."""
+    return ["pw-record", "--target", mic, "--rate", str(REC_RATE), "--channels", str(CHANNELS), "--format", "f32",
             "--raw", target]
 
 
@@ -41,3 +42,26 @@ def window_title() -> str:
     """The focused window's title. Not available on GNOME Wayland without an extension: Shell.Eval is
     disabled and Introspect.GetWindows is refused, so this is always 'unknown' (see SPEC.md)."""
     return "unknown"
+
+
+class Down3:
+    """48 kHz -> 16 kHz for the VAD/model: a low-pass (63-tap Kaiser-windowed sinc, cutoff 7.4 kHz), then keep
+    every third sample. Stateful, so it can be fed chunks of any size. (No resampler library needed.)"""
+
+    N = 63
+
+    def __init__(self):
+        k = np.arange(self.N) - (self.N - 1) / 2
+        fc = 7400 / REC_RATE
+        h = np.sinc(2 * fc * k) * 2 * fc * np.kaiser(self.N, 8.0)
+        self.h = (h / h.sum()).astype(np.float32)
+        self.tail = np.zeros(self.N - 1, dtype=np.float32)
+        self.seen = 0                                    # filtered samples produced so far
+
+    def __call__(self, x: np.ndarray) -> np.ndarray:
+        buf = np.concatenate([self.tail, x.astype(np.float32, copy=False)])
+        y = np.convolve(buf, self.h, mode="valid")       # one output per input sample
+        self.tail = buf[-(self.N - 1):]
+        out = y[(-self.seen) % 3::3]
+        self.seen += len(y)
+        return np.ascontiguousarray(out)

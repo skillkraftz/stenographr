@@ -256,7 +256,7 @@ dfresh; mkdir -p "$W/gate"
 FAKE_PW_GATE=$W/gate FAKE_ENGINE_TEXT="one|two|three" steno toggle; echo $? > "$W/rc"
 waitfor '[[ $(ydo_n) -ge 1 ]]'
 check "press 1 returns at once; sentence 1 is typed before any stop signal" '[[ $(cat "$W/rc") == 0 && $(cat "$W/ydo.log") == "type --file - | one " ]]'
-check "recorder: scarlett-mic, 16 kHz, 2 ch, f32, raw, to stdout" 'grep -qxE -- "--target scarlett-mic --rate 16000 --channels 2 --format f32 --raw -" "$W/pw.log"'
+check "recorder: scarlett-mic, 48 kHz, 2 ch, f32, raw, to stdout" 'grep -qxE -- "--target scarlett-mic --rate 48000 --channels 2 --format f32 --raw -" "$W/pw.log"'
 touch "$W/gate/go2"; waitfor '[[ $(ydo_n) -ge 2 ]]'; touch "$W/gate/go3"; waitfor '[[ $(ydo_n) -ge 3 ]]'
 printf 'type --file - | one \ntype --file - | two \ntype --file - | three \n' > "$W/ydo.exp"
 check "ydotool called 3 times as the sentences arrive, each sentence + one space" 'diff "$W/ydo.log" "$W/ydo.exp"'
@@ -264,7 +264,7 @@ check "before the stop: nothing on the clipboard, no end line, but all 3 sentenc
 steno toggle; echo $? > "$W/rc"; waitfor '[[ $(endn) -ge 1 ]]'
 check "press 2: exit 0; clipboard has all 3 joined, no timestamps" '[[ $(cat "$W/rc") == 0 && $(cat "$W/clip") == "one two three" ]]'
 T0=$(sed -n 1p "$DAILY" | grep -oE "[0-9]{2}:[0-9]{2}:[0-9]{2} ·" | cut -d" " -f1)
-check "daily block: start, 3 lines timestamped recording start + offset (0, 5, 10 s), end ok" '[[ $(wc -l < "$DAILY") == 5 ]] && grep -qE "^start: $BLK · type · unknown$" "$DAILY" && sed -n 2p "$DAILY" | grep -qx "\[$T0\] one" && sed -n 3p "$DAILY" | grep -qx "\[$(plus $T0 5)\] two" && sed -n 4p "$DAILY" | grep -qx "\[$(plus $T0 10)\] three" && sed -n 5p "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok$"'
+check "daily block: start, 3 lines timestamped recording start + offset (0, 5, 10 s), end ok" '[[ $(wc -l < "$DAILY") == 5 ]] && grep -qE "^start: $BLK · type · unknown · audio/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}-type\\.opus$" "$DAILY" && sed -n 2p "$DAILY" | grep -qx "\\[$T0\\] one" && sed -n 3p "$DAILY" | grep -qx "\[$(plus $T0 5)\] two" && sed -n 4p "$DAILY" | grep -qx "\[$(plus $T0 10)\] three" && sed -n 5p "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok$"'
 check "session over: state cleared, still exactly 3 ydotool calls" '[[ ! -e $XDG_RUNTIME_DIR/stenographr/state && $(ydo_n) == 3 ]]'
 check "steno.log: start, device, finish" 'grep -q " type start: " "$LOG" && grep -q " type device: " "$LOG" && grep -q " type finish: 3 sentences, ok" "$LOG"'
 
@@ -305,6 +305,7 @@ dfresh; mkdir -p "$W/gate"
 FAKE_PW_GATE=$W/gate FAKE_ENGINE_TEXT="one|two|three" steno toggle; waitfor '[[ $(ydo_n) -ge 1 ]]'; touch "$W/gate/go2"; waitfor '[[ $(ydo_n) -ge 2 ]]'
 kill -9 "$(SESS)"; sleep 0.2; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null
 check "session killed mid-way: daily has the 2 sentences so far and no end line" '[[ $(grep -cE "^$TS " "$DAILY") == 2 && $(endn) == 0 ]] && grep -qE "^start: $BLK · type" "$DAILY"'
+check "killed session: the start line still carries the audio pointer, and that file exists" 'sed -n 1p "$DAILY" | grep -qE " · type · unknown · audio/[0-9-]+-type\.opus$" && [[ -f $A/$(sed -n 1p "$DAILY" | grep -oE "audio/[^ ]+$") ]]'
 steno recall </dev/null > "$W/rc.out" 2>&1
 check "recall still lists the crashed session" 'grep -q "^1 piece\|: 1 piece$" "$W/rc.out" && grep -qE "^1\. \[[0-9]{2}:[0-9]{2}\] type · one two$" "$W/rc.out"'
 
@@ -317,7 +318,7 @@ dfresh; ND=$W/nt; rm -rf "$ND"; mkdir -p "$W/gate"
 nstart "$ND" FAKE_PW_GATE="$W/gate" FAKE_ENGINE_TEXT="one|two|three"
 nwait 1; NF=$ND/steno-$(date +%F).txt
 check "sentence 1: printed bare, already in both files (timestamped)" '[[ $(cat "$W/notes.out") == one ]] && grep -qE "^$TS one$" "$NF" && grep -qE "^$TS one$" "$DAILY" && ! grep -q "^end:" "$NF"'
-check "notes file starts with the header, once" '[[ $(head -1 "$NF") == "stenographr notes · $ND" ]] && sed -n 2p "$NF" | grep -qE "^start: $BLK · notes · $ND$" && [[ $(grep -c "^stenographr notes ·" "$NF") == 1 ]]'
+check "notes file starts with the header, once" '[[ $(head -1 "$NF") == "stenographr notes · $ND" ]] && sed -n 2p "$NF" | grep -qE "^start: $BLK · notes · $NF · audio/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}-notes\\.opus$" && [[ $(grep -c "^stenographr notes ·" "$NF") == 1 ]]'
 check "daily file has no header line" '! grep -q "^stenographr notes" "$DAILY" && head -1 "$DAILY" | grep -q "^start: "'
 touch "$W/gate/go2"; nwait 2; check "sentence 2 appears when it is spoken, not at the end" '[[ $(tail -1 "$NF") == *"] two" && $(tail -1 "$DAILY") == *"] two" ]]'
 touch "$W/gate/go3"; nwait 3
@@ -338,18 +339,69 @@ check "notes, mic missing: exit 1, FAILED block in the daily file only" '[[ $(ca
 dfresh; mkdir -p "$W/gate"; nstart "$ND" FAKE_ENGINE_LOAD_DELAY=1.2 FAKE_ENGINE_TEXT="one|two|three"; nwait 3 120; nstop
 check "notes: audio that arrived while the model loaded is not lost" '[[ $(cat "$W/notes.out") == "$(printf "one\ntwo\nthree")" ]]'
 
-echo "== notes in a git repo"
-dfresh; RD=$W/repo; rm -rf "$RD"; mkdir -p "$RD/sub"; git init -q "$RD"
+echo "== notes in a git repo: <repo root>/steno/"
+dfresh; RD=$W/repo; rm -rf "$RD"; mkdir -p "$RD/sub/deeper"; git init -q "$RD"
 printf 'node_modules' > "$RD/.gitignore"                     # no trailing newline: must not glue onto it
+nstart "$RD/sub/deeper" FAKE_PW_CHUNKS=1; nwait 1; nstop
+RN=$RD/steno/steno-$(date +%F).txt
+check "run from a subfolder: the notes file is <repo root>/steno/steno-DATE.txt, nothing loose in the folder" '[[ -f $RN && -z $(ls -A "$RD/sub/deeper") && ! -e $RD/steno-$(date +%F).txt ]]'
+check "header names the repo root; the daily start line points at the notes file" '[[ $(head -1 "$RN") == "stenographr notes · $RD" ]] && grep -qE "^start: $BLK · notes · $RN · audio/" "$DAILY"'
+check "steno/ appended to the repo root .gitignore (own line)" '[[ $(cat "$RD/.gitignore") == "$(printf "node_modules\nsteno/")" ]] && [[ ! -e $RD/sub/deeper/.gitignore ]]'
+check "git ignores steno/ now; nothing staged or committed" '(cd "$RD" && git check-ignore -q steno/x && [[ -z $(git status --porcelain --untracked-files=all | grep steno) ]] && ! git rev-parse HEAD >/dev/null 2>&1)'
+check "the addition is logged" 'grep -q "INFO  notes added steno/ to .*/repo/.gitignore" "$LOG"'
 nstart "$RD/sub" FAKE_PW_CHUNKS=1; nwait 1; nstop
-check "steno-*.txt appended to the repo root .gitignore (own line)" '[[ $(cat "$RD/.gitignore") == "$(printf "node_modules\nsteno-*.txt")" ]] && [[ ! -e $RD/sub/.gitignore ]]'
-check "git now ignores the notes file; nothing staged or committed" '(cd "$RD" && git check-ignore -q sub/steno-test.txt && [[ -z $(git status --porcelain --untracked-files=all | grep steno) ]] && ! git rev-parse HEAD >/dev/null 2>&1)'
-check "the addition is logged" 'grep -q "INFO  notes added steno-\*.txt to .*/repo/.gitignore" "$LOG"'
-nstart "$RD/sub" FAKE_PW_CHUNKS=1; nwait 1; nstop
-check "second run: .gitignore not touched again" '[[ $(grep -c "steno-\*.txt" "$RD/.gitignore") == 1 ]]'
-dfresh; RD2=$W/repo2; rm -rf "$RD2"; mkdir -p "$RD2"; git init -q "$RD2"; printf 'steno-*.txt\n' > "$RD2/.gitignore"
+check "second run: .gitignore not touched again, same notes file gets the second block" '[[ $(grep -c "^steno/" "$RD/.gitignore") == 1 && $(grep -c "^start:" "$RN") == 2 && $(grep -c "^stenographr notes ·" "$RN") == 1 ]]'
+dfresh; RD2=$W/repo2; rm -rf "$RD2"; mkdir -p "$RD2"; git init -q "$RD2"; printf 'steno/\n' > "$RD2/.gitignore"
 nstart "$RD2" FAKE_PW_CHUNKS=1; nwait 1; nstop
-check "already ignored: .gitignore left as is" '[[ $(cat "$RD2/.gitignore") == "steno-*.txt" ]]'
+check "already ignored: .gitignore left as is" '[[ $(cat "$RD2/.gitignore") == "steno/" && -f $RD2/steno/steno-$(date +%F).txt ]]'
+dfresh; RD3=$W/repo3; rm -rf "$RD3"; mkdir -p "$RD3"; git init -q "$RD3"; printf 'steno-*.txt\n' > "$RD3/.gitignore"
+nstart "$RD3" FAKE_PW_CHUNKS=1; nwait 1; nstop
+check "the old steno-*.txt line no longer counts: steno/ is added" '[[ $(cat "$RD3/.gitignore") == "$(printf "steno-*.txt\nsteno/")" ]]'
+
+echo "== session audio"
+dfresh; mkdir -p "$W/gate"; export FAKE_FF_ENC_LOG=$W/enc.log; rm -f "$FAKE_FF_ENC_LOG"
+FAKE_PW_GATE=$W/gate FAKE_ENGINE_TEXT="one|two|three" steno toggle; waitfor '[[ $(ydo_n) -ge 1 ]]'; touch "$W/gate/go2"; waitfor '[[ $(ydo_n) -ge 2 ]]'; touch "$W/gate/go3"; waitfor '[[ $(ydo_n) -ge 3 ]]'
+steno toggle; waitfor '[[ $(endn) -ge 1 ]]'; sleep 0.3
+ST=$(sed -n 1p "$DAILY" | grep -oE "^start: [0-9-]+ [0-9:]+" | cut -d" " -f2-); AF=$(date -d "$ST" +%Y-%m-%d-%H%M%S)-type.opus
+check "type session: exactly one audio file, named session start + mode, in <archive>/audio/" '[[ $(ls "$A/audio" | wc -l) == 1 && -s $A/audio/$AF ]]'
+check "type session: the start line points to it (relative to the archive)" 'sed -n 1p "$DAILY" | grep -qE " · type · unknown · audio/$AF$" && [[ -f $A/$(sed -n 1p "$DAILY" | grep -oE "audio/[^ ]+$") ]]'
+check "encoder was given mono 48 kHz Opus at 96 kbps and exactly the voice channel (3 x 5 s mono f32)" 'grep -qE "^-hide_banner .*-f f32le -ar 48000 -ac 1 -i - -c:a libopus -b:a 96k .* [^ ]+/audio/$AF \| 2880000$" "$W/enc.log"'
+check "audio is not in the way: text still typed 3 times, clipboard set, end ok" '[[ $(ydo_n) == 3 && $(cat "$W/clip") == "one two three" ]] && tail -1 "$DAILY" | grep -qE "· ok$"'
+mkdir -p "$W/an"; rm -rf "$A" "$W/gate"; mkdir -p "$W/gate"; rm -f "$FAKE_FF_ENC_LOG"
+nstart "$W/an" FAKE_ENGINE_TEXT="one|two|three"; nwait 3; nstop
+ST=$(sed -n 1p "$DAILY" | grep -oE "^start: [0-9-]+ [0-9:]+" | cut -d" " -f2-); AN=$(date -d "$ST" +%Y-%m-%d-%H%M%S)-notes.opus
+check "notes session: one audio file named by start time and mode; start line points to it" '[[ $(ls "$A/audio" | wc -l) == 1 && -s $A/audio/$AN ]] && sed -n 1p "$DAILY" | grep -qE " · notes · $W/an/steno-[0-9-]+\.txt · audio/$AN$" && sed -n 2p "$W/an/steno-$(date +%F).txt" | grep -qE " · audio/$AN$"'
+check "notes audio: same encoder settings, 3 x 5 s" 'grep -qE "libopus -b:a 96k .*\| 2880000$" "$W/enc.log"'
+"$PY" - <<EOF
+import sys, datetime as dt, tempfile, pathlib
+from stenographr.audio import pick_path
+d = pathlib.Path(tempfile.mkdtemp()); t = dt.datetime(2026,11,9,11,28,50)
+p1 = pick_path(d, t, "notes"); assert p1.name == "2026-11-09-112850-notes.opus"
+p1.parent.mkdir(); p1.write_text("x")
+p2 = pick_path(d, t, "notes"); assert p2.name == "2026-11-09-112850-notes-2.opus", p2.name
+assert p1.read_text() == "x"
+assert pick_path(d, t, "type").name == "2026-11-09-112850-type.opus"
+EOF
+check "an existing audio file is never reused (-2) and is left alone" '[[ $? == 0 ]]'
+check "decimator 48k->16k: speech band passes, >8 kHz removed, chunking does not matter" '"$PY" - <<EOF
+import numpy as np
+from stenographr.record import Down3
+fs = 48000
+def run(f, step):
+    x = np.sin(2*np.pi*f*np.arange(fs)/fs).astype(np.float32); d = Down3()
+    return np.concatenate([d(x[i:i+step]) for i in range(0, fs, step)])
+assert abs(run(1000, 4800)[200:].std() - 0.707) < 0.02
+assert run(12000, 4800)[200:].std() < 0.02
+assert len(run(1000, 4800)) == 16000 and np.allclose(run(3000, 4800), run(3000, 777), atol=1e-5)
+EOF'
+dfresh; rm -rf "$A" "$W/gate"; export FAKE_FF_ENC_FAIL=1
+mkdir -p "$W/gate"; FAKE_PW_GATE=$W/gate FAKE_PW_CHUNKS=2 FAKE_ENGINE_TEXT="one|two" steno toggle; waitfor '[[ $(ydo_n) -ge 1 ]]'; touch "$W/gate/go2"; waitfor '[[ $(ydo_n) -ge 2 ]]'; steno toggle; waitfor '[[ $(endn) -ge 1 ]]'
+check "encoder fails: the text is still typed and copied" '[[ $(ydo_n) == 2 && $(cat "$W/clip") == "one two" ]]'
+check "encoder fails: start line says audio: none, end line says audio FAILED, no audio file" 'sed -n 1p "$DAILY" | grep -qE "^start: $BLK · type · unknown · audio: none$" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok \(audio FAILED, see steno.log\)$" && [[ ! -e $A/audio || -z $(ls -A "$A/audio") ]]'
+check "encoder fails: logged with the reason" 'grep -q "ERROR type audio not saved .*ffmpeg exited at start .*Permission denied" "$LOG"'
+dfresh; rm -rf "$A"; nstart "$W/an2" FAKE_PW_CHUNKS=1 FAKE_ENGINE_TEXT="solo"; nwait 1; nstop
+check "notes with a failing encoder: sentences still printed and filed, exit 0, audio FAILED" '[[ $(cat "$W/notes.out") == solo && $(cat "$W/rc") == 0 ]] && grep -qE "· audio: none$" "$DAILY" && tail -1 "$DAILY" | grep -qE "· ok \(audio FAILED, see steno.log\)$" && grep -q "solo" "$W/an2/steno-$(date +%F).txt"'
+unset FAKE_FF_ENC_FAIL FAKE_FF_ENC_LOG
 
 echo "== recall (pieces of one daily file)"
 dfresh; mkdir -p "$A/clips"
@@ -388,6 +440,18 @@ check "recall never writes any file" '[[ $(find "$A" -type f | sort | xargs cat 
 printf 'start: %s 10:13:00 · type · unknown\nend: %s 10:13:00 · 0s · FAILED: mic scarlett-mic not found, see steno.log\n' $TD $TD > "$A/steno-$TD.txt"
 steno recall </dev/null > "$W/rc.out" 2>&1
 check "today has no pieces: falls back to the latest day that does" '[[ $(head -1 "$W/rc.out") == "steno-$YD.txt: 2 pieces" ]] && grep -qE "^1\. \[09:30\] notes · yesterday b Oh yeah, I didn.t mean to blah.*\.\.\.$" "$W/rc.out" && grep -qx "2. \[09:00\] type · yesterday a" "$W/rc.out"'
+printf 'start: %s 08:00:00 · type · unknown\n[08:00:01] old format\nend: %s 08:00:09 · 9s · ok\nstart: %s 08:10:00 · notes · /x/steno/steno-2026-11-09.txt · audio/2026-11-09-081000-notes.opus\n[08:10:02] new format notes\nend: %s 08:10:09 · 9s · ok\nstart: %s 08:20:00 · type · unknown · audio/2026-11-09-082000-type.opus\n[08:20:02] new format type\nstart: %s 08:30:00 · type · unknown · audio: none\n[08:30:02] no audio\nend: %s 08:30:09 · 9s · ok (audio FAILED, see steno.log)\n' $TD $TD $TD $TD $TD $TD $TD > "$A/steno-$TD.txt"
+steno recall </dev/null > "$W/rc.out" 2>&1
+check "recall reads old and new start-line formats (path + audio pointer, audio: none, no end line)" '[[ $(head -1 "$W/rc.out") == "steno-$TD.txt: 4 pieces" ]] && grep -qx "1. \[08:30\] type · no audio" "$W/rc.out" && grep -qx "2. \[08:20\] type · new format type" "$W/rc.out" && grep -qx "3. \[08:10\] notes · new format notes" "$W/rc.out" && grep -qx "4. \[08:00\] type · old format" "$W/rc.out"'
+check "parser: the audio pointer is its own field, not part of 'where' (old format: empty)" '"$PY" - <<EOF
+from stenographr.daily import parse_sessions
+t = open("$A/steno-$TD.txt").read()
+p = parse_sessions(t)
+assert [x.audio for x in p] == ["", "audio/2026-11-09-081000-notes.opus", "audio/2026-11-09-082000-type.opus", "audio: none"], [x.audio for x in p]
+assert p[1].where == "/x/steno/steno-2026-11-09.txt" and p[0].where == "unknown" and p[3].where == "unknown"
+assert p[2].status is None and p[3].status.startswith("ok (audio FAILED")
+EOF'
+printf '3\n' | steno recall >/dev/null 2>&1; check "...and copies the text only (no path, no audio pointer)" '[[ $(cat "$W/clip") == "new format notes" ]]'
 rm -rf "$A"; mkdir -p "$A"; steno recall </dev/null >/dev/null 2>&1; echo $? > "$W/rc"; check "nothing to recall: exit 1" '[[ $(cat "$W/rc") == 1 ]]'
 
 echo "== GNOME keybinding"
