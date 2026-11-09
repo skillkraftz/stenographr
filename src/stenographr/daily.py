@@ -48,9 +48,11 @@ class Session:
     skipped, so one bad file never costs the other."""
 
     def __init__(self, log: Log, name: str, targets: list[tuple[Path, str | None]], start: dt.datetime,
-                 mode: str, where: str):
+                 mode: str, where: str, audio: str | None = None):
+        """`audio`: 'audio/<file>.opus', or 'audio: none' when it could not be kept; None = no audio part."""
         self.log, self.name, self.targets, self.start = log, name, targets, start
-        self._write(f"start: {stamp(start)}{_SEP}{mode}{_SEP}{where}\n", first=True)
+        tail = f"{_SEP}{audio}" if audio else ""
+        self._write(f"start: {stamp(start)}{_SEP}{mode}{_SEP}{where}{tail}\n", first=True)
 
     def _write(self, text: str, first: bool = False) -> None:
         for path, header in self.targets:
@@ -84,9 +86,10 @@ class Parsed:
     status: str | None      # None: no end line (crash)
     day: str
     hhmm: str = ""          # time of day the session started
+    audio: str = ""         # 'audio/<file>.opus', 'audio: none', or '' (older files)
 
 
-_START = re.compile(r"^start: \S+ (\d\d:\d\d):\d\d · (\w+) · (.*)$")
+_START = re.compile(r"^start: \S+ (\d\d:\d\d):\d\d · (\w+) · (.*?)(?: · (audio/\S+|audio: none))?$")
 _STAMP = re.compile(r"^\[\d\d:\d\d:\d\d\] ")
 _END = re.compile(r"^end: \S+ \S+ · \S+ · (.*)$")
 _POINTER = re.compile(r"^(clip|other): ")
@@ -101,14 +104,15 @@ def parse_sessions(text: str, day: str = "") -> list[Parsed]:
     def close():
         nonlocal cur
         if cur:
-            out.append(Parsed(cur["mode"], cur["where"], " ".join(cur["lines"]).strip(), cur["status"], day, cur["hhmm"]))
+            out.append(Parsed(cur["mode"], cur["where"], " ".join(cur["lines"]).strip(), cur["status"], day, cur["hhmm"], cur["audio"]))
         cur = None
 
     for line in text.splitlines():
         m = _START.match(line)
         if m:
             close()
-            cur = {"hhmm": m.group(1), "mode": m.group(2), "where": m.group(3), "lines": [], "status": None}
+            cur = {"hhmm": m.group(1), "mode": m.group(2), "where": m.group(3), "audio": m.group(4) or "",
+                   "lines": [], "status": None}
         elif cur is not None and _END.match(line):
             cur["status"] = _END.match(line).group(1)
             close()

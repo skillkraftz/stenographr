@@ -4,6 +4,9 @@ Read this before changing behaviour; update it when behaviour changes. Lines mar
 "(changed 2026-11-09)" were revised on that date. Status tags: BUILT / NOT BUILT.
 
 ## Purpose
+The goal of the whole project: `/data/transcripts` must let me put everything back together: what was said,
+when, where it went, and the audio it came from. The daily file `steno-YYYY-MM-DD.txt` is the single manifest.
+
 Every transcription stenographr makes (from clips, notes or typing) is also copied to one known
 location. That way I can see everything I dictated on a given day and copy text back out if
 delivery fails. The archive is a backup: readable, copy-pasteable, no JSON in anything I read.
@@ -20,8 +23,12 @@ Obsidian). (changed 2026-11-09)
     clip-2025-11-27-155055_001.txt    the Samsung suffix is kept
   other/
     2026-11-08-some-talk.txt          any other video: <recording date>-<stem>
+  audio/                              the audio of every dictation session (changed 2026-11-10)
+    2026-11-09-112850-notes.opus      <session start>-<mode>.opus, mono 48 kHz Opus 96 kbps
+    2026-11-09-113002-type.opus
 ```
-- Files sit loose in the folder. The only subfolders are `clips/` and `other/`, and both are flat.
+- Files sit loose in the folder. The only subfolders are `clips/`, `other/` and `audio/`, all flat.
+- Audio files are never deleted or overwritten by stenographr (a name collision gets `-2`).
 - One transcript per source file: if either its `<stem>.txt` next to the video or its archive copy
   already exists, `clip` refuses that video, prints the `rm` command to redo it and exits 1. Nothing
   is ever overwritten and no `-2` is added. The daily file is append-only. (`srt` still writes `-2`,
@@ -74,16 +81,27 @@ The word before the time is `clip` for Samsung-named videos and `other` for the 
 when the line was written. If writing the manifest itself fails, that is logged to `steno.log`
 and the run carries on (the transcript still counts).
 
-Dictation sessions (BUILT 2026-11-09; timestamps added 2026-11-10), written by `toggle` and `notes`:
+Dictation sessions (BUILT 2026-11-09; timestamps added 2026-11-10; audio pointer added 2026-11-10), written by
+`toggle` and `notes`:
 ```
-start: 2026-11-09 10:00:00 · type · unknown
+start: 2026-11-09 10:00:00 · type · unknown · audio/2026-11-09-100000-type.opus
 [10:00:03] <sentence>
 [10:00:09] <sentence>
 end: 2026-11-09 10:00:42 · 42s · ok
-start: 2026-11-09 10:05:00 · notes · /home/andy/projects/hyperbeam
+start: 2026-11-09 10:05:00 · notes · /home/andy/projects/hyperbeam/steno/steno-2026-11-09.txt · audio/2026-11-09-100500-notes.opus
 [10:05:02] <sentence>
 end: 2026-11-09 10:12:30 · 7m30s · ok
 ```
+- **Audio pointer (changed 2026-11-10):** the last part of the start line is the session's audio file, relative to
+  the archive root. If the audio could not be kept it reads `audio: none` and the end line says
+  `ok (audio FAILED, see steno.log)`; the session itself still runs and delivers. A session that never got
+  going (e.g. mic not found) has no audio part. Older files (no audio part) are still read by recall.
+- **Where (changed 2026-11-10):** for notes it is the notes file's full path (not just the folder); for type
+  it is the window, always `unknown`.
+- **Audio time zero = text time zero:** the audio file starts at the first sample from the recorder, and the
+  text timestamps are the recording start + each sentence's offset counted from that same sample, so
+  `[HH:MM:SS] - start line time` is the position in the audio (to within the whole-second resolution of the
+  stamps; verified against the real model).
 - **Sentence lines carry a time of day (changed 2026-11-10):** `[HH:MM:SS]` = the recording start + the
   sentence's offset into the audio (when it started being said, not when it was transcribed). This is in
   the daily file and in the notes file, for both type and notes sessions. start/end lines and clip lines
@@ -146,15 +164,24 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
   `XDG_RUNTIME_DIR` (verified 2026-11-10).
 - **Notes mode**, `stenographr notes` (aliasable to `steno`): runs in the terminal until Ctrl+C. Text
   appears sentence by sentence as I pause (Silero VAD fed live, 0.6 s of silence ends a sentence); each
-  sentence is appended at once to `./steno-YYYY-MM-DD.txt` in the current folder and to the daily file
-  (timestamped there; the terminal shows bare sentences). Notes and type share one streaming loop
-  (`dictate._live`).
-  The notes file's first line, written only when the file is created, is
-  `stenographr notes · <absolute folder>`; after that come the same start / sentences / end blocks. One
-  file per day per folder, append only. Ctrl+C finishes the sentence in progress, writes the end lines
-  and exits 0. The model is loaded once per session.
-  In a git work tree where `steno-*.txt` is not ignored, the line `steno-*.txt` is appended to the repo
-  root's `.gitignore` (and logged); nothing is ever committed.
+  sentence is appended at once to the notes file and to the daily file (timestamped there; the terminal
+  shows bare sentences). Notes and type share one streaming loop (`dictate._live`).
+  **Notes file location (changed 2026-11-10):** inside a git work tree, `<repo root>/steno/steno-YYYY-MM-DD.txt`
+  (`steno/` is created); anywhere else, `./steno-YYYY-MM-DD.txt` in the current folder. The file's first line,
+  written only when it is created, is `stenographr notes · <absolute folder>` (the repo root, or the current
+  folder); after that come the same start / sentences / end blocks. One file per day per place, append only.
+  Ctrl+C finishes the sentence in progress, writes the end lines and exits 0. The model is loaded once.
+  In a repo where `git check-ignore -q steno/x` says `steno/` is not ignored, the line `steno/` is appended
+  to the repo root's `.gitignore` (and logged); nothing is ever committed. `steno/` is also in the global git
+  ignore on this machine, so normally nothing needs adding.
+- **Session audio (BUILT 2026-11-10)**, both modes: the mic is recorded at 48 kHz (`pw-record --rate 48000`,
+  2 channels, float32), channel 1 (AUX0) is kept, and it is (a) streamed to ffmpeg's libopus encoder while
+  recording: mono, 48 kHz, 96 kbps (about 0.7 MB per minute), to `<archive>/audio/YYYY-MM-DD-HHMMSS-<mode>.opus`
+  (session start), and (b) decimated to 16 kHz for the VAD/model (a 63-tap low-pass + every third sample,
+  `record.Down3`; no resampler library needed). The encoder uses `-flush_packets 1` and a 0.2 s Ogg page
+  duration, so a file cut off mid-write (ffmpeg killed) still plays up to about 0.3 s before the cut; if
+  stenographr itself dies, ffmpeg sees its input close and finishes the file. The audio is for tuning the
+  live-typing latency and as background audio for screen recordings in Kdenlive.
 - **Recording indicator:** GNOME's built-in mic icon in the top bar (verified: it appears with
   `pw-record`). No notifications.
 - **Mic:** the WirePlumber config in `system/wireplumber` (PR #3) names the mic 2i2 `scarlett-mic`
@@ -165,7 +192,7 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
 - **Hotkey:** `stenographr keybinding install` adds a GNOME custom keybinding "stenographr dictation",
   `<Control>grave`, command = the absolute path of `stenographr` + ` toggle`; it appends to the existing
   list and never changes other entries. `stenographr keybinding remove` removes only that entry.
-- Needs `pw-record`, `pw-dump`, `ydotool` (user service running), `wl-copy`, `git` (notes mode only).
+- Needs `pw-record`, `pw-dump`, `ffmpeg` (with libopus), `ydotool` (user service running), `wl-copy`, `git` (notes mode only).
 
 ## Other decisions
 - Corrections file for mis-heard names: dropped (transcripts mostly go to AI, which infers meaning).

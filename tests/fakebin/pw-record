@@ -5,7 +5,8 @@
 #                   $FAKE_PW_GATE/goN if FAKE_PW_GATE is set; then runs until killed
 echo "$*" >> "${FAKE_PW_LOG:-/dev/null}"
 [ "$FAKE_PW_FAIL" = 1 ] && { echo "fake pw-record: no such target" >&2; exit 1; }
-for last; do :; done
+rate=16000; prev=
+for last; do [ "$prev" = --rate ] && rate=$last; prev=$last; done
 sleep 1000 & SP=$!
 trap 'kill $SP 2>/dev/null; exit 0' INT TERM
 if [ "$last" = "-" ]; then
@@ -14,10 +15,10 @@ if [ "$last" = "-" ]; then
     if [ "$i" -gt 1 ] && [ -n "$FAKE_PW_GATE" ]; then
       while [ ! -e "$FAKE_PW_GATE/go$i" ]; do sleep 0.05; done
     fi
-    head -c $(( ${FAKE_ENGINE_SECONDS:-5} * 16000 * 8 )) /dev/zero
+    head -c $(( ${FAKE_ENGINE_SECONDS:-5} * rate * 8 )) /dev/zero
     i=$((i+1))
   done
 else
-  head -c $(( ${FAKE_PW_SECONDS:-12} * 16000 * 8 )) /dev/zero > "$last"
+  head -c $(( ${FAKE_PW_SECONDS:-12} * rate * 8 )) /dev/zero > "$last"
 fi
 wait $SP

@@ -16,9 +16,10 @@ import threading
 import time
 from pathlib import Path
 
+from . import audio as audiomod
 from . import daily
 from .log import Log
-from .record import channel_of, mic_exists, recorder_cmd, window_title
+from .record import Down3, channel_of, mic_exists, recorder_cmd, window_title
 from .runner import Engines, pick_device
 
 
@@ -49,6 +50,10 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
           before_end=None, on_stop=None) -> tuple[str, list[str]]:
     """Record from the mic and turn speech into sentences as the speaker pauses.
 
+    The audio is kept: recorded at 48 kHz, channel 1 only, encoded to Ogg/Opus while recording (audio.py), and
+    decimated to 16 kHz for the VAD/model. Both come from the same samples, so the audio's time zero is the text's
+    time zero (the first sample from the recorder).
+
     The recorder starts FIRST and a thread keeps reading it, so the audio spoken while the model loads is
     queued, not lost. Every sentence goes to the session files at once, as `[HH:MM:SS] text` (recording start
     + the sentence's offset into the audio), and to `on_sentence(text)` (no timestamp). SIGINT/SIGTERM
@@ -67,6 +72,8 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
         signal.signal(sig, handler)
 
     _state_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
+    enc = audiomod.Encoder(audiomod.pick_path(cfg.archive, t0, mode), log, name, _state_dir() / f"{name}.audio.err")
+    audio_ptr = f"audio/{enc.path.name}" if enc.ok else "audio: none"
     err = open(_state_dir() / f"{name}.err", "wb")
     proc = subprocess.Popen(recorder_cmd(cfg.mic, "-"), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=err, start_new_session=True)
@@ -84,8 +91,8 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
                 return
 
     threading.Thread(target=pump, daemon=True).start()
-    sess = daily.Session(log, name, targets, t0, mode, where)
-    log.info(name, f"start: {where}, mic {cfg.mic} channel {cfg.channel}")
+    sess = daily.Session(log, name, targets, t0, mode, where, audio_ptr)
+    log.info(name, f"start: {where}, mic {cfg.mic} channel {cfg.channel}, {audio_ptr}")
 
     texts: list[str] = []
     status = daily.ok()
@@ -111,7 +118,7 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
             log.error(name, f"GPU engine failed, using CPU: {type(e).__name__}: {e}")
             stream = engines.get("cpu", name).stream()
 
-        rest, stopping = b"", False
+        rest, stopping, down = b"", False, Down3()
         while True:
             if stop and not stopping:
                 stopping = True                          # no more audio: stop the recorder, drain what it sent
@@ -135,7 +142,9 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
             rest += b
             k = len(rest) // 8 * 8                       # whole stereo float32 frames only
             data, rest = rest[:k], rest[k:]
-            emit(stream.accept(channel_of(data, cfg.channel)))
+            mono = channel_of(data, cfg.channel)         # 48 kHz, the voice channel
+            enc.write(mono.tobytes())
+            emit(stream.accept(down(mono)))
         emit(stream.flush())                             # the sentence still in progress
     except Exception as e:                               # noqa: BLE001
         log.error(name, f"{type(e).__name__}: {e}")
@@ -150,9 +159,12 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
         except subprocess.TimeoutExpired:
             proc.kill()
 
+    saved = enc.close()                                  # the encoder writes the end of the file
     problems = before_end(texts) if before_end else []
     if status == daily.ok():
         status = daily.failed(", ".join(problems)) if problems else daily.ok(no_speech=not texts)
+    if not saved and status.startswith("ok"):
+        status = "ok (audio FAILED, see steno.log)"
     sess.end(dt.datetime.now(), status)
     log.info(name, f"finish: {len(texts)} sentences, {status}")
     return status, texts
@@ -244,21 +256,26 @@ def type_session(cfg, log: Log, requested: str) -> int:
 
 # ---------------------------------------------------------------- notes
 
-def _gitignore(log: Log) -> None:
-    """Notes files must not get committed by accident: in a git work tree where steno-*.txt isn't ignored,
-    append that pattern to the repo root's .gitignore. Never commits anything."""
+def _repo_root() -> Path | None:
     try:
-        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
-        if top.returncode != 0:
-            return
-        if subprocess.run(["git", "check-ignore", "-q", "steno-test.txt"]).returncode != 1:
+        r = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    except OSError:
+        return None
+    return Path(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else None
+
+
+def _gitignore(log: Log, root: Path) -> None:
+    """The steno/ folder must never get committed by accident: if git doesn't ignore it yet, append `steno/` to the
+    repo root's .gitignore (and log it). Never commits anything."""
+    try:
+        if subprocess.run(["git", "check-ignore", "-q", "steno/x"], cwd=root).returncode != 1:
             return                                       # 0: already ignored; 128: git error: leave it alone
-        gi = Path(top.stdout.strip()) / ".gitignore"
+        gi = root / ".gitignore"
         old = gi.read_text() if gi.exists() else ""
         with open(gi, "a", encoding="utf-8") as f:
-            f.write(("\n" if old and not old.endswith("\n") else "") + "steno-*.txt\n")
-        log.info("notes", f"added steno-*.txt to {gi}")
-    except (OSError, FileNotFoundError) as e:
+            f.write(("\n" if old and not old.endswith("\n") else "") + "steno/\n")
+        log.info("notes", f"added steno/ to {gi}")
+    except OSError as e:
         log.error("notes", f"could not update .gitignore: {type(e).__name__}: {e}")
 
 
@@ -271,11 +288,15 @@ def notes(cfg, log: Log, requested: str) -> int:
         _fail_block(cfg, log, name, "notes", str(cwd), start, f"mic {cfg.mic} not found")
         print(f"stenographr: mic {cfg.mic} not found", file=sys.stderr)
         return 1
-    _gitignore(log)
-    notes_file = cwd / f"steno-{start:%Y-%m-%d}.txt"
+    root = _repo_root()
+    if root:                                             # in a git work tree: <repo root>/steno/, ignored by git
+        _gitignore(log, root)
+        home, notes_file = root, root / "steno" / f"steno-{start:%Y-%m-%d}.txt"
+    else:
+        home, notes_file = cwd, cwd / f"steno-{start:%Y-%m-%d}.txt"
     print(f"stenographr notes: listening on {cfg.mic}; Ctrl+C to stop", file=sys.stderr)
-    status, _ = _live(cfg, log, requested, name, "notes", str(cwd),
+    status, _ = _live(cfg, log, requested, name, "notes", str(notes_file),
                       [(daily.daily_path(cfg.archive, start), None),
-                       (notes_file, f"stenographr notes · {cwd}")],
+                       (notes_file, f"stenographr notes · {home}")],
                       lambda text: print(text, flush=True))          # terminal: no timestamps
     return 0 if status.startswith("ok") else 1
