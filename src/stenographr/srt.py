@@ -1,4 +1,4 @@
-""".md -> .srt (offsets into the video, not time of day)."""
+""".txt -> .srt (offsets into the video, not time of day)."""
 from __future__ import annotations
 
 import re
@@ -13,9 +13,9 @@ def _ts(h: int, m: int, s: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},000"
 
 
-def md_to_srt(md_text: str) -> str:
+def md_to_srt(text: str) -> str:
     blocks = []
-    for line in md_text.splitlines():
+    for line in text.splitlines():
         m = _LINE.match(line)
         if not m:
             continue
@@ -29,6 +29,6 @@ def md_to_srt(md_text: str) -> str:
 
 
 def write_srt(md_path: Path) -> Path:
-    """FILE.srt next to FILE.md; if it exists already, FILE-2.srt (never overwrites)."""
+    """FILE.srt next to FILE.txt; if it exists already, FILE-2.srt (never overwrites)."""
     text = md_to_srt(md_path.read_text(encoding="utf-8"))
     return write_new(md_path.parent, md_path.stem, ".srt", text)
