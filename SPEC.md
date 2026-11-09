@@ -74,29 +74,33 @@ The word before the time is `clip` for Samsung-named videos and `other` for the 
 when the line was written. If writing the manifest itself fails, that is logged to `steno.log`
 and the run carries on (the transcript still counts).
 
-Dictation sessions (BUILT 2026-11-09), written by `toggle` and `notes`:
+Dictation sessions (BUILT 2026-11-09; timestamps added 2026-11-10), written by `toggle` and `notes`:
 ```
 start: 2026-11-09 10:00:00 · type · unknown
-<transcribed text>
+[10:00:03] <sentence>
+[10:00:09] <sentence>
 end: 2026-11-09 10:00:42 · 42s · ok
 start: 2026-11-09 10:05:00 · notes · /home/andy/projects/hyperbeam
-<sentence>
-<sentence>
+[10:05:02] <sentence>
 end: 2026-11-09 10:12:30 · 7m30s · ok
 ```
+- **Sentence lines carry a time of day (changed 2026-11-10):** `[HH:MM:SS]` = the recording start + the
+  sentence's offset into the audio (when it started being said, not when it was transcribed). This is in
+  the daily file and in the notes file, for both type and notes sessions. start/end lines and clip lines
+  are unchanged. Timestamps are only in these kept records: never in the terminal output of `notes`, the
+  text typed by `toggle`, the clipboard, or recall's output.
 - The start line records when, which mode (`type` or `notes`) and where the text went: the window
   for typing, the absolute folder for notes. The window is always `unknown`: on GNOME Wayland without an
   extension the focused window's title cannot be read (`Shell.Eval` is disabled and
   `Introspect.GetWindows` is refused; verified 2026-11-09).
 - The end line records when it ended, how long the recording was (`42s`, `7m30s`, `1h02m05s`) and the
   result: `ok`, `ok (no speech)`, or `FAILED: <short reason>, see steno.log` (mic not found, typing
-  failed, clipboard failed, recorder failed to start, transcription failed). A failure shows here first,
-  with the details in `steno.log`.
-- A session is everything from starting dictation to stopping it, not one block per phrase. A type
-  session is written as one block when it stops; a notes session is appended sentence by sentence as it
-  goes, so a crash leaves a block with no end line (recall still sees it: its text is the lines after its
-  start). A session that never got going (e.g. mic missing) leaves a start/end pair with no text.
-- No timestamps inside a session for now. **Open:** a time-of-day prefix per phrase for long dictations.
+  failed, clipboard failed, recorder exited, transcription error). A failure shows here first, with the
+  details in `steno.log`.
+- A session is everything from starting dictation to stopping it, not one block per phrase. Both modes
+  append each sentence as it is spoken (changed 2026-11-10: type used to write its block at the end), so a
+  crash leaves a block with no end line; recall still sees it (its text is the lines after its start).
+  A session that never got going (e.g. mic missing) leaves a start/end pair with no text.
 
 ## 3. Error log (BUILT for clips): `steno.log`
 - Plain text, one line per event: time, level, session or file, message. A single log; there is no
@@ -104,34 +108,47 @@ end: 2026-11-09 10:12:30 · 7m30s · ok
 - It records starts and finishes, the device chosen and why, and every error with enough detail
   to understand what happened. Purpose: if I dictate and nothing shows up, this file says why.
 
-## 4. recall (BUILT 2026-11-09)
-`stenographr recall [N]` (aliasable to `recall`). It only reads the daily files; it never writes to them.
-- Lists the last 10 sessions (type and notes, failed ones and ones with no end line included; not
-  clip/other lines; not empty sessions), newest first, one line each: about 60 characters of text, then
-  `...` if it was cut. Earlier daily files are read when today has fewer than 10.
+## 4. recall (BUILT 2026-11-09; reworked 2026-11-10)
+`stenographr recall [N]` (aliasable to `recall`). Read-only on every file. It works on the pieces of ONE
+daily file: today's, or if that has no pieces, the most recent daily file that does.
+- A **piece** is one session block (start..end, or start..end of file / next piece when the end line is
+  missing) or one clip/other line. A session with no text (e.g. mic not found) is not a piece.
+- Pieces are numbered newest first. The header names the file and the total: `steno-2026-11-09.txt: 23 pieces`.
+  The list shows the newest 10, one line each: `N. [HH:MM] <mode> · <first ~60 characters>...` (the `...` only
+  when cut). For a clip/other line the mode is `clip`/`other`, then the source name, then the start of that
+  transcript's text (a line with no transcript, e.g. FAILED, shows what the line says).
   ```
-  1. Oh yeah, I didn't mean to ...
-  2. Well that worked but what ...
-  Which do you need to copy? 1
-  recalled:
-  <the full text>
+  steno-2026-11-09.txt: 23 pieces
+  1. [11:51] notes · Alright, it's Sunday, November eighth. Uh 740 to go to the b...
+  2. [11:50] clip · 20261109_083630 · This is a test. This is a test. We are testing
+  Which do you need to copy? (a = list all)
   ```
-- The choice goes on the clipboard (`wl-copy`) and is printed in full. A notes session is copied as
-  one paragraph (its sentences joined with spaces). Enter or `q` exits without copying.
-- `recall N` skips the list and copies session N directly.
-- It works even if delivery failed, because it reads the daily file.
+- At the prompt: a number from 1 to the total copies that piece; `a` lists all pieces with the same
+  numbering and asks again; Enter or `q` exits without copying.
+- What is copied is text only, never timestamps: a session's sentences joined with spaces; for a clip/other
+  piece, the spoken text of that transcript file (no header, no time prefixes). If the transcript file is
+  missing, it says so and copies nothing. `recalled:` and the full text are printed after copying.
+- `recall N` copies piece N of that file without listing.
 
 ## 5. Dictation modes (BUILT 2026-11-09)
 - **Clip:** section 1.
-- **Type mode**, `stenographr toggle`, bound to Ctrl+`: press once to start recording, again to stop. On
-  stop: transcribe (existing engine and device selection), put the text on the clipboard (`wl-copy`),
-  type it at the cursor (`ydotool type`), then write the session block to the daily file. If typing
-  fails the text is still on the clipboard and in the daily file, and the end line says FAILED. No speech:
-  nothing typed or copied, end line `ok (no speech)`. State (recorder pid, start time, the raw audio)
-  is in `$XDG_RUNTIME_DIR/stenographr/`; a pid that is gone means start fresh.
+- **Type mode**, `stenographr toggle`, bound to Ctrl+` (live since 2026-11-10): the first press starts a
+  background session (`stenographr _type-session`, detached, no terminal needed) and returns at once. The
+  session starts the recorder FIRST and keeps reading it, then loads the model, so what is said while the
+  model loads is queued and still transcribed. As soon as I pause, each sentence is typed at the cursor
+  (`ydotool type`: the sentence plus one space) and appended to the daily file with its timestamp. The
+  second press sends SIGTERM to the session: it finishes the sentence in progress, types it, puts the whole
+  session's text (no timestamps) on the clipboard (`wl-copy`), writes the end line and exits. If typing
+  fails the clipboard and the daily file still have everything, and the end line says FAILED. No speech:
+  nothing typed or copied, `ok (no speech)`. State (the session pid) is in
+  `$XDG_RUNTIME_DIR/stenographr/state`; a pid that is gone means start fresh. A detached process with no
+  terminal keeps running and reaches Wayland and the ydotool socket through the session's
+  `XDG_RUNTIME_DIR` (verified 2026-11-10).
 - **Notes mode**, `stenographr notes` (aliasable to `steno`): runs in the terminal until Ctrl+C. Text
   appears sentence by sentence as I pause (Silero VAD fed live, 0.6 s of silence ends a sentence); each
-  sentence is appended at once to `./steno-YYYY-MM-DD.txt` in the current folder and to the daily file.
+  sentence is appended at once to `./steno-YYYY-MM-DD.txt` in the current folder and to the daily file
+  (timestamped there; the terminal shows bare sentences). Notes and type share one streaming loop
+  (`dictate._live`).
   The notes file's first line, written only when the file is created, is
   `stenographr notes · <absolute folder>`; after that come the same start / sentences / end blocks. One
   file per day per folder, append only. Ctrl+C finishes the sentence in progress, writes the end lines

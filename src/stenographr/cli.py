@@ -108,7 +108,12 @@ def _cfg_log(args):
 
 def cmd_toggle(args) -> int:
     cfg, log = _cfg_log(args)
-    return dictate.toggle(cfg, log, args.device or cfg.device)
+    return dictate.toggle(cfg, log, args.device or cfg.device, args.config)
+
+
+def cmd_type_session(args) -> int:
+    cfg, log = _cfg_log(args)
+    return dictate.type_session(cfg, log, args.device or cfg.device)
 
 
 def cmd_notes(args) -> int:
@@ -157,6 +162,9 @@ def main(argv: list[str] | None = None) -> int:
         d = sub.add_parser(nm, help=h)
         d.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: config (auto)")
         d.set_defaults(fn=fn)
+    t = sub.add_parser("_type-session")                  # the background process behind `toggle`
+    t.add_argument("--device", choices=["cpu", "gpu", "auto"])
+    t.set_defaults(fn=cmd_type_session)
     r = sub.add_parser("recall", help="copy a recent dictation back to the clipboard")
     r.add_argument("n", nargs="?", type=int, help="session number (skips the list)")
     r.set_defaults(fn=cmd_recall)

@@ -73,20 +73,26 @@ alias steno='stenographr notes'
 alias recall='stenographr recall'
 ```
 
-- `stenographr toggle`: press once to start recording, again to stop. On stop it transcribes, copies the text to the
-  clipboard, types it at the cursor (ydotool), and adds a block to `<archive>/steno-YYYY-MM-DD.txt`. If typing
-  fails the text is still on the clipboard and in the daily file (the block ends `FAILED: typing failed`).
+- `stenographr toggle` (Ctrl+`): the first press starts a background session that records at once and types each
+  sentence at the cursor as you pause (sentence + a space). The second press finishes the last sentence, puts the
+  whole session on the clipboard and ends the session. Everything is appended to the daily file as it is said.
 - `stenographr notes` (`steno`): live in the terminal until Ctrl+C. Each sentence is printed, and appended at once
   to `./steno-YYYY-MM-DD.txt` (header line `stenographr notes · <folder>` when the file is created) and to the
   daily file. In a git repo it adds `steno-*.txt` to the repo's `.gitignore` if that isn't ignored yet.
-- `stenographr recall [N]` (`recall`): lists the last 10 dictations (type and notes, failed ones too); pick one and it
-  goes on the clipboard and is printed. `recall 2` copies number 2 directly; Enter or `q` copies nothing.
+- `stenographr recall [N]` (`recall`): works on one daily file (today's, else the latest with anything in it). It
+  prints `steno-DATE.txt: N pieces`, lists the newest 10 (sessions and clip/other lines), and asks which to copy: a
+  number copies it, `a` lists all, Enter or `q` exits. `recall 2` copies piece 2 directly. A clip piece copies that
+  transcript's text.
+
+Only the kept records carry times: each sentence line in the daily and notes files starts with `[HH:MM:SS]` (when it
+was said). The terminal output, typed text, clipboard and recall output never have them.
 
 Block format (details in [SPEC.md](SPEC.md)):
 
 ```
 start: 2026-11-09 10:00:00 · type · unknown
-<text>
+[10:00:03] <sentence>
+[10:00:09] <sentence>
 end: 2026-11-09 10:00:42 · 42s · ok
 ```
 

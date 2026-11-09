@@ -65,8 +65,10 @@ class Session:
             except OSError as e:
                 self.log.error(self.name, f"could not write {path}: {type(e).__name__}: {e}")
 
-    def line(self, text: str) -> None:
-        self._write(" ".join(text.split()) + "\n")
+    def line(self, text: str, when: dt.datetime | None = None) -> None:
+        """One sentence. With `when`, the line starts with the time of day it was said: [HH:MM:SS]."""
+        prefix = f"[{when:%H:%M:%S}] " if when else ""
+        self._write(prefix + " ".join(text.split()) + "\n")
 
     def end(self, when: dt.datetime, status: str) -> None:
         self._write(f"end: {stamp(when)}{_SEP}{fmt_dur((when - self.start).total_seconds())}{_SEP}{status}\n")
@@ -81,9 +83,11 @@ class Parsed:
     text: str
     status: str | None      # None: no end line (crash)
     day: str
+    hhmm: str = ""          # time of day the session started
 
 
-_START = re.compile(r"^start: \S+ \S+ · (\w+) · (.*)$")
+_START = re.compile(r"^start: \S+ (\d\d:\d\d):\d\d · (\w+) · (.*)$")
+_STAMP = re.compile(r"^\[\d\d:\d\d:\d\d\] ")
 _END = re.compile(r"^end: \S+ \S+ · \S+ · (.*)$")
 _POINTER = re.compile(r"^(clip|other): ")
 
@@ -97,20 +101,20 @@ def parse_sessions(text: str, day: str = "") -> list[Parsed]:
     def close():
         nonlocal cur
         if cur:
-            out.append(Parsed(cur["mode"], cur["where"], " ".join(cur["lines"]).strip(), cur["status"], day))
+            out.append(Parsed(cur["mode"], cur["where"], " ".join(cur["lines"]).strip(), cur["status"], day, cur["hhmm"]))
         cur = None
 
     for line in text.splitlines():
         m = _START.match(line)
         if m:
             close()
-            cur = {"mode": m.group(1), "where": m.group(2), "lines": [], "status": None}
+            cur = {"hhmm": m.group(1), "mode": m.group(2), "where": m.group(3), "lines": [], "status": None}
         elif cur is not None and _END.match(line):
             cur["status"] = _END.match(line).group(1)
             close()
         elif _POINTER.match(line):
             close()
         elif cur is not None and line.strip():
-            cur["lines"].append(line.strip())
+            cur["lines"].append(_STAMP.sub("", line.strip()))
     close()
     return out
