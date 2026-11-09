@@ -1,4 +1,4 @@
-"""Test engine: no model. One segment per FAKE_ENGINE_SECONDS of audio, text from FAKE_ENGINE_TEXT."""
+"""Test engine: no model (FAKE_ENGINE_COUNT=file logs one line per construction). One segment per FAKE_ENGINE_SECONDS of audio, text from FAKE_ENGINE_TEXT."""
 from __future__ import annotations
 
 import os
@@ -14,6 +14,9 @@ class FakeEngine:
     name = "fake"
 
     def __init__(self, cfg: Config, device: str):
+        if os.environ.get("FAKE_ENGINE_COUNT"):          # tests count constructions (= model loads)
+            with open(os.environ["FAKE_ENGINE_COUNT"], "a") as f:
+                f.write(device + "\n")
         if device == "gpu" and os.environ.get("FAKE_ENGINE_FAIL_GPU") == "1":
             raise RuntimeError("fake CUDA failure")
         self.device = device
