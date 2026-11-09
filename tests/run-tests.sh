@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Offline tests: fake engine, fake nvidia-smi/ffmpeg/ffprobe first on PATH. No model, GPU, network or /data.
 HERE=$(dirname "$(readlink -f "$0")"); PROJECT=$(dirname "$HERE")
-W=$(mktemp -d); trap 'jobs -p | xargs -r kill 2>/dev/null; rm -rf "$W"' EXIT
+W=$(mktemp -d); trap 'jobs -p | xargs -r kill 2>/dev/null; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null; rm -rf "$W"' EXIT
 
 # python with numpy: $STENO_PY, else the uv tool venv, else system python
 PY=${STENO_PY:-}
@@ -240,50 +240,73 @@ check "missing file: error, next file still done" '[[ $(cat "$W/rc") == 1 && -f 
 # ======================================================================= dictation
 export XDG_CONFIG_HOME=$W/xdg GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null   # the user's global gitignore must not matter
 export XDG_RUNTIME_DIR=$W/run FAKE_PW_LOG=$W/pw.log FAKE_YDOTOOL_LOG=$W/ydo.log FAKE_CLIP=$W/clip FAKE_GSETTINGS=$W/gs
-dfresh() { fresh; rm -rf "$XDG_RUNTIME_DIR" "$W/pw.log" "$W/ydo.log" "$W/clip" "$W/gate"; unset FAKE_MIC_MISSING FAKE_PW_FAIL FAKE_YDOTOOL_FAIL FAKE_ENGINE_TEXT FAKE_ENGINE_SECONDS FAKE_PW_GATE FAKE_PW_CHUNKS; }
+dfresh() { fresh; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null; rm -rf "$XDG_RUNTIME_DIR" "$W/pw.log" "$W/ydo.log" "$W/clip" "$W/gate"; unset FAKE_MIC_MISSING FAKE_PW_FAIL FAKE_YDOTOOL_FAIL FAKE_ENGINE_TEXT FAKE_ENGINE_SECONDS FAKE_PW_GATE FAKE_PW_CHUNKS FAKE_ENGINE_LOAD_DELAY; }
 DAILY=$A/steno-$(date +%F).txt
 BLK='[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}'
 
-echo "== toggle (type mode)"
-dfresh
-FAKE_ENGINE_SECONDS=100 FAKE_ENGINE_TEXT="hello world" steno toggle; echo $? > "$W/rc"
-check "first press: recording started, nothing typed or written yet" '[[ $(cat "$W/rc") == 0 && -s $XDG_RUNTIME_DIR/stenographr/state && ! -e $W/ydo.log && ! -e $DAILY ]]'
-check "recorder: scarlett-mic, 16 kHz, 2 ch, f32, raw" 'grep -qxE -- "--target scarlett-mic --rate 16000 --channels 2 --format f32 --raw .*/stenographr/rec.f32" "$W/pw.log"'
-sleep 0.3
-FAKE_ENGINE_SECONDS=100 FAKE_ENGINE_TEXT="hello world" steno toggle; echo $? > "$W/rc"
-check "second press: exit 0, recorder state cleared" '[[ $(cat "$W/rc") == 0 && ! -e $XDG_RUNTIME_DIR/stenographr/state ]]'
-check "typed once, with the text" '[[ $(wc -l < "$W/ydo.log") == 1 && $(cat "$W/ydo.log") == "type --file - | hello world" ]]'
-check "text is on the clipboard" '[[ $(cat "$W/clip") == "hello world" ]]'
-check "daily file: one block, ends ok" '[[ $(wc -l < "$DAILY") == 3 ]] && grep -qE "^start: $BLK · type · unknown$" "$DAILY" && sed -n 2p "$DAILY" | grep -qx "hello world" && grep -qE "^end: $BLK · [0-9]+s · ok$" "$DAILY"'
-check "steno.log: start, device, timing, finish" 'grep -q " type start: recording" "$LOG" && grep -q " type device: " "$LOG" && grep -q " type timing: " "$LOG" && grep -q " type finish: " "$LOG"'
-check "channel 1 = AUX0 is the one kept" '"$PY" - <<EOF
-import numpy as np
-from stenographr.record import channel_of
-raw = np.array([1,2,1,2,1,2], dtype=np.float32).tobytes() + b"\x00\x00"      # a trailing partial frame is dropped
-assert channel_of(raw, 1).tolist() == [1,1,1] and channel_of(raw, 2).tolist() == [2,2,2]
-EOF'
+waitfor() { local i; for i in $(seq ${2:-120}); do eval "$1" && return 0; sleep 0.05; done; return 1; }
+ydo_n() { local n; n=$(grep -c . "$W/ydo.log" 2>/dev/null); echo "${n:-0}"; }
+endn() { local n; n=$(grep -c '^end:' "$DAILY" 2>/dev/null); echo "${n:-0}"; }
+plus() { date -d "$(date +%F) $1 $2 seconds" +%T; }            # plus HH:MM:SS N -> HH:MM:SS + N seconds
+TS='\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]'
+SESS() { cut -d' ' -f1 "$XDG_RUNTIME_DIR/stenographr/state"; }
+
+echo "== toggle (type mode, live)"
+dfresh; mkdir -p "$W/gate"
+FAKE_PW_GATE=$W/gate FAKE_ENGINE_TEXT="one|two|three" steno toggle; echo $? > "$W/rc"
+waitfor '[[ $(ydo_n) -ge 1 ]]'
+check "press 1 returns at once; sentence 1 is typed before any stop signal" '[[ $(cat "$W/rc") == 0 && $(cat "$W/ydo.log") == "type --file - | one " ]]'
+check "recorder: scarlett-mic, 16 kHz, 2 ch, f32, raw, to stdout" 'grep -qxE -- "--target scarlett-mic --rate 16000 --channels 2 --format f32 --raw -" "$W/pw.log"'
+touch "$W/gate/go2"; waitfor '[[ $(ydo_n) -ge 2 ]]'; touch "$W/gate/go3"; waitfor '[[ $(ydo_n) -ge 3 ]]'
+printf 'type --file - | one \ntype --file - | two \ntype --file - | three \n' > "$W/ydo.exp"
+check "ydotool called 3 times as the sentences arrive, each sentence + one space" 'diff "$W/ydo.log" "$W/ydo.exp"'
+check "before the stop: nothing on the clipboard, no end line, but all 3 sentences are in the daily file" '[[ ! -e $W/clip && $(endn) == 0 && $(grep -cE "^$TS " "$DAILY") == 3 ]]'
+steno toggle; echo $? > "$W/rc"; waitfor '[[ $(endn) -ge 1 ]]'
+check "press 2: exit 0; clipboard has all 3 joined, no timestamps" '[[ $(cat "$W/rc") == 0 && $(cat "$W/clip") == "one two three" ]]'
+T0=$(sed -n 1p "$DAILY" | grep -oE "[0-9]{2}:[0-9]{2}:[0-9]{2} ·" | cut -d" " -f1)
+check "daily block: start, 3 lines timestamped recording start + offset (0, 5, 10 s), end ok" '[[ $(wc -l < "$DAILY") == 5 ]] && grep -qE "^start: $BLK · type · unknown$" "$DAILY" && sed -n 2p "$DAILY" | grep -qx "\[$T0\] one" && sed -n 3p "$DAILY" | grep -qx "\[$(plus $T0 5)\] two" && sed -n 4p "$DAILY" | grep -qx "\[$(plus $T0 10)\] three" && sed -n 5p "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok$"'
+check "session over: state cleared, still exactly 3 ydotool calls" '[[ ! -e $XDG_RUNTIME_DIR/stenographr/state && $(ydo_n) == 3 ]]'
+check "steno.log: start, device, finish" 'grep -q " type start: " "$LOG" && grep -q " type device: " "$LOG" && grep -q " type finish: 3 sentences, ok" "$LOG"'
+
+dfresh; export FAKE_ENGINE_LOAD_DELAY=1.5 FAKE_ENGINE_TEXT="one|two|three"
+steno toggle; sleep 0.5
+check "model still loading: nothing typed yet" '[[ ! -e $W/ydo.log ]]'
+waitfor '[[ $(ydo_n) -ge 3 ]]' 200
+check "audio that arrived while the model loaded is still transcribed (3 sentences typed)" '[[ $(ydo_n) == 3 ]]'
+steno toggle; waitfor '[[ $(endn) -ge 1 ]]'; unset FAKE_ENGINE_LOAD_DELAY
+dfresh; export FAKE_ENGINE_LOAD_DELAY=1.5 FAKE_ENGINE_TEXT="one|two|three"
+steno toggle; sleep 0.3; steno toggle; waitfor '[[ $(endn) -ge 1 ]]' 200; unset FAKE_ENGINE_LOAD_DELAY
+check "stopped before the model finished loading: nothing lost, all 3 sentences typed and copied" '[[ $(ydo_n) == 3 && $(cat "$W/clip") == "one two three" ]] && grep -qE "^end: $BLK · [0-9]+s · ok$" "$DAILY"'
 
 dfresh; FAKE_MIC_MISSING=1 steno toggle; echo $? > "$W/rc"
 check "mic missing: exit 1, recorder never started, no state" '[[ $(cat "$W/rc") == 1 && ! -e $W/pw.log && ! -e $XDG_RUNTIME_DIR/stenographr/state ]]'
 check "mic missing: daily block FAILED: mic scarlett-mic not found" 'grep -qE "^start: $BLK · type · unknown$" "$DAILY" && grep -qE "^end: $BLK · [0-9]+s · FAILED: mic scarlett-mic not found, see steno.log$" "$DAILY"'
-check "mic missing: logged, no other input tried" 'grep -q "ERROR type mic scarlett-mic not found" "$LOG" && ! grep -q -- "--target" "$W/pw.log" 2>/dev/null'
+check "mic missing: logged, no other input tried" 'grep -q "ERROR type mic scarlett-mic not found" "$LOG"'
 
-dfresh; export FAKE_ENGINE_SECONDS=100 FAKE_ENGINE_TEXT="hello world"
-steno toggle; sleep 0.3; FAKE_YDOTOOL_FAIL=1 steno toggle; echo $? > "$W/rc"
-check "ydotool fails: exit 1, clipboard still set" '[[ $(cat "$W/rc") == 1 && $(cat "$W/clip") == "hello world" ]]'
-check "ydotool fails: daily has the text and FAILED" 'sed -n 2p "$DAILY" | grep -qx "hello world" && grep -qE "^end: $BLK · [0-9]+s · FAILED: typing failed, see steno.log$" "$DAILY" && grep -q "ERROR type typing (ydotool) failed" "$LOG"'
+dfresh; mkdir -p "$W/gate"
+FAKE_YDOTOOL_FAIL=1 FAKE_PW_GATE=$W/gate FAKE_PW_CHUNKS=2 FAKE_ENGINE_TEXT="one|two" steno toggle
+waitfor '[[ $(ydo_n) -ge 1 ]]'; touch "$W/gate/go2"; waitfor '[[ $(ydo_n) -ge 2 ]]'; steno toggle; waitfor '[[ $(endn) -ge 1 ]]'
+check "ydotool fails: the clipboard still gets the whole session" '[[ $(cat "$W/clip") == "one two" ]]'
+check "ydotool fails: daily has both sentences and FAILED: typing failed" '[[ $(grep -cE "^$TS " "$DAILY") == 2 ]] && grep -qE "^end: $BLK · [0-9]+s · FAILED: typing failed, see steno.log$" "$DAILY" && grep -q "ERROR type typing (ydotool) failed" "$LOG"'
 
 dfresh; export FAKE_ENGINE_TEXT=" "
-steno toggle; sleep 0.3; steno toggle; echo $? > "$W/rc"
-check "no speech: nothing typed, clipboard untouched, end 'ok (no speech)'" '[[ $(cat "$W/rc") == 0 && ! -e $W/ydo.log && ! -e $W/clip ]] && grep -qE "^end: $BLK · [0-9]+s · ok \(no speech\)$" "$DAILY"'
+steno toggle; sleep 0.8; steno toggle; waitfor '[[ $(endn) -ge 1 ]]'
+check "no speech: nothing typed, clipboard untouched, end 'ok (no speech)'" '[[ ! -e $W/ydo.log && ! -e $W/clip ]] && grep -qE "^end: $BLK · [0-9]+s · ok \(no speech\)$" "$DAILY" && [[ $(wc -l < "$DAILY") == 2 ]]'
 
-dfresh; export FAKE_ENGINE_SECONDS=100 FAKE_ENGINE_TEXT="hello world"
+dfresh; export FAKE_PW_CHUNKS=1 FAKE_ENGINE_TEXT="hello"
 mkdir -p "$XDG_RUNTIME_DIR/stenographr"; echo "999999 1700000000" > "$XDG_RUNTIME_DIR/stenographr/state"
-steno toggle; echo $? > "$W/rc"
-check "stale pid file: a new recording starts (no processing, nothing typed)" '[[ $(cat "$W/rc") == 0 && -s $W/pw.log && ! -e $W/ydo.log && ! -e $DAILY && $(cut -d" " -f1 "$XDG_RUNTIME_DIR/stenographr/state") != 999999 ]] && grep -q "WARN  type stale recorder state" "$LOG"'
-steno toggle >/dev/null; check "...and the next press stops it normally" '[[ $(cat "$W/ydo.log") == "type --file - | hello world" ]]'
-dfresh; FAKE_PW_FAIL=1 steno toggle; echo $? > "$W/rc"
-check "recorder dies at start: exit 1, FAILED block, no state" '[[ $(cat "$W/rc") == 1 && ! -e $XDG_RUNTIME_DIR/stenographr/state ]] && grep -q "FAILED: recorder failed to start, see steno.log" "$DAILY"'
+steno toggle; echo $? > "$W/rc"; waitfor '[[ $(ydo_n) -ge 1 ]]'
+check "stale session file: a new session starts and types" '[[ $(cat "$W/rc") == 0 && -s $W/pw.log && $(cat "$W/ydo.log") == "type --file - | hello " && $(SESS) != 999999 ]] && grep -q "WARN  type stale session state" "$LOG"'
+steno toggle; waitfor '[[ $(endn) -ge 1 ]]'; check "...and the next press ends it normally" '[[ $(cat "$W/clip") == "hello" ]]'
+dfresh; FAKE_PW_FAIL=1 steno toggle; echo $? > "$W/rc"; waitfor '[[ $(endn) -ge 1 ]]'
+check "recorder dies at start: FAILED block, state cleared" '[[ $(cat "$W/rc") == 0 ]] && grep -q "FAILED: recorder exited, see steno.log" "$DAILY" && waitfor "[[ ! -e \$XDG_RUNTIME_DIR/stenographr/state ]]"'
+
+dfresh; mkdir -p "$W/gate"
+FAKE_PW_GATE=$W/gate FAKE_ENGINE_TEXT="one|two|three" steno toggle; waitfor '[[ $(ydo_n) -ge 1 ]]'; touch "$W/gate/go2"; waitfor '[[ $(ydo_n) -ge 2 ]]'
+kill -9 "$(SESS)"; sleep 0.2; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null
+check "session killed mid-way: daily has the 2 sentences so far and no end line" '[[ $(grep -cE "^$TS " "$DAILY") == 2 && $(endn) == 0 ]] && grep -qE "^start: $BLK · type" "$DAILY"'
+steno recall </dev/null > "$W/rc.out" 2>&1
+check "recall still lists the crashed session" 'grep -q "^1 piece\|: 1 piece$" "$W/rc.out" && grep -qE "^1\. \[[0-9]{2}:[0-9]{2}\] type · one two$" "$W/rc.out"'
 
 echo "== notes mode"
 # run `notes` in the background in directory $1; helpers wait for output / interrupt it
@@ -293,22 +316,27 @@ nstop() { kill -INT $NP; wait $NP; echo $? > "$W/rc"; }
 dfresh; ND=$W/nt; rm -rf "$ND"; mkdir -p "$W/gate"
 nstart "$ND" FAKE_PW_GATE="$W/gate" FAKE_ENGINE_TEXT="one|two|three"
 nwait 1; NF=$ND/steno-$(date +%F).txt
-check "sentence 1 printed and already in both files" '[[ $(cat "$W/notes.out") == one ]] && grep -qx one "$NF" && grep -qx one "$DAILY" && ! grep -q "^end:" "$NF"'
+check "sentence 1: printed bare, already in both files (timestamped)" '[[ $(cat "$W/notes.out") == one ]] && grep -qE "^$TS one$" "$NF" && grep -qE "^$TS one$" "$DAILY" && ! grep -q "^end:" "$NF"'
 check "notes file starts with the header, once" '[[ $(head -1 "$NF") == "stenographr notes · $ND" ]] && sed -n 2p "$NF" | grep -qE "^start: $BLK · notes · $ND$" && [[ $(grep -c "^stenographr notes ·" "$NF") == 1 ]]'
 check "daily file has no header line" '! grep -q "^stenographr notes" "$DAILY" && head -1 "$DAILY" | grep -q "^start: "'
-touch "$W/gate/go2"; nwait 2; check "sentence 2 appears when it is spoken, not at the end" '[[ $(tail -1 "$NF") == two && $(tail -1 "$DAILY") == two ]]'
+touch "$W/gate/go2"; nwait 2; check "sentence 2 appears when it is spoken, not at the end" '[[ $(tail -1 "$NF") == *"] two" && $(tail -1 "$DAILY") == *"] two" ]]'
 touch "$W/gate/go3"; nwait 3
 nstop
-check "Ctrl+C: exit 0, 3 lines printed" '[[ $(cat "$W/rc") == 0 && $(grep -c . "$W/notes.out") == 3 && $(sed -n 3p "$W/notes.out") == three ]]'
+check "Ctrl+C: exit 0; terminal shows 3 bare lines, no timestamps" '[[ $(cat "$W/rc") == 0 && $(cat "$W/notes.out") == "$(printf "one\ntwo\nthree")" ]]'
+T0=$(sed -n 2p "$NF" | grep -oE "[0-9]{2}:[0-9]{2}:[0-9]{2} ·" | cut -d" " -f1)
+check "notes file: [HH:MM:SS] = recording start + offset (0, 5, 10 s)" 'sed -n 3p "$NF" | grep -qx "\[$T0\] one" && sed -n 4p "$NF" | grep -qx "\[$(plus $T0 5)\] two" && sed -n 5p "$NF" | grep -qx "\[$(plus $T0 10)\] three"'
+check "daily file: same timestamps" 'sed -n 2p "$DAILY" | grep -qx "\[$T0\] one" && sed -n 4p "$DAILY" | grep -qx "\[$(plus $T0 10)\] three"'
 check "end line written to both files" 'tail -1 "$NF" | grep -qE "^end: $BLK · [0-9]+s · ok$" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok$"'
 check "both files: start, 3 sentences, end" '[[ $(wc -l < "$DAILY") == 5 && $(wc -l < "$NF") == 6 ]]'
 rm -rf "$W/gate"
 nstart "$ND" FAKE_PW_CHUNKS=1 FAKE_ENGINE_TEXT="again"; nwait 1; nstop
 check "second session, same day and folder: header still only once, 2 blocks" '[[ $(grep -c "^stenographr notes ·" "$NF") == 1 && $(grep -c "^start:" "$NF") == 2 && $(grep -c "^end:" "$NF") == 2 ]]'
 check "notes outside a git repo: only the steno file is created" '[[ $(ls -A "$ND") == "steno-$(date +%F).txt" ]]'
-check "steno.log: start, device, timing-less finish" 'grep -q " notes start: " "$LOG" && grep -q " notes device: " "$LOG" && grep -q " notes finish: 1 sentences, ok" "$LOG"'
-dfresh; FAKE_MIC_MISSING=1 steno notes 2>/dev/null; echo $? > "$W/rc"
-check "notes, mic missing: exit 1, FAILED block in the daily file only" '[[ $(cat "$W/rc") == 1 && ! -e $W/pw.log ]] && grep -q "FAILED: mic scarlett-mic not found" "$DAILY" && ! ls "$PWD"/steno-*.txt >/dev/null 2>&1'
+check "steno.log: start, device, finish" 'grep -q " notes start: " "$LOG" && grep -q " notes device: " "$LOG" && grep -q " notes finish: 1 sentences, ok" "$LOG"'
+dfresh; mkdir -p "$W/empty"; (cd "$W/empty" && FAKE_MIC_MISSING=1 steno notes 2>/dev/null); echo $? > "$W/rc"
+check "notes, mic missing: exit 1, FAILED block in the daily file only" '[[ $(cat "$W/rc") == 1 && ! -e $W/pw.log ]] && grep -q "FAILED: mic scarlett-mic not found" "$DAILY" && ! ls "$W/empty"/steno-*.txt >/dev/null 2>&1'
+dfresh; mkdir -p "$W/gate"; nstart "$ND" FAKE_ENGINE_LOAD_DELAY=1.2 FAKE_ENGINE_TEXT="one|two|three"; nwait 3 120; nstop
+check "notes: audio that arrived while the model loaded is not lost" '[[ $(cat "$W/notes.out") == "$(printf "one\ntwo\nthree")" ]]'
 
 echo "== notes in a git repo"
 dfresh; RD=$W/repo; rm -rf "$RD"; mkdir -p "$RD/sub"; git init -q "$RD"
@@ -323,36 +351,43 @@ dfresh; RD2=$W/repo2; rm -rf "$RD2"; mkdir -p "$RD2"; git init -q "$RD2"; printf
 nstart "$RD2" FAKE_PW_CHUNKS=1; nwait 1; nstop
 check "already ignored: .gitignore left as is" '[[ $(cat "$RD2/.gitignore") == "steno-*.txt" ]]'
 
-echo "== recall"
-dfresh; mkdir -p "$A"
+echo "== recall (pieces of one daily file)"
+dfresh; mkdir -p "$A/clips"
 TD=$(date +%F); YD=$(date -d yesterday +%F)
-sess() { printf 'start: %s 10:00:00 · %s · %s\n%s\n' "$1" "$2" "$3" "$4"; [[ -n $5 ]] && printf 'end: %s 10:00:42 · 42s · %s\n' "$1" "$5"; true; }
-{ for i in 1 2 3 4 5 6 7 8 9; do sess "$YD" type unknown "yesterday session $i text" ok; done
-  echo "clip: $YD 11:00:00 · 20261108_063820 → clips/clip-2026-11-08-063820.txt"; } > "$A/steno-$YD.txt"
-LONG="Oh yeah, I didn't mean to blah blah blah blah blah blah blah blah blah blah blah blah blah blah blah"
-{ sess "$TD" type unknown "wrote to the wrong window" "FAILED: typing failed, see steno.log"
-  echo "other: $TD 09:00:00 · some-talk → other/$TD-some-talk.txt"
-  printf 'start: %s 10:30:00 · notes · /tmp/proj\nfirst sentence.\nsecond sentence.\n' "$TD"      # crash: no end line
-  sess "$TD" type unknown "" "ok (no speech)"
-  sess "$TD" type unknown "$LONG" ok; } > "$DAILY"
-SUM=$(cat "$A"/steno-*.txt | md5sum)
+printf '# 20261109_083630 · recorded 2026-11-09 08:36 · 00:00:05\nsource: /x/20261109_083630.mp4\nengine: fake (cpu) · transcribed 2026-11-09 08:37\n\n[00:00:00 → 00:00:03 | 08:36:30] Hello there.\n[00:00:04 → 00:00:06 | 08:36:34] General Kenobi.\n' > "$A/clips/clip-2026-11-09-083630.txt"
+LONG="Oh yeah, I didn't mean to blah blah blah blah blah blah blah blah blah blah blah blah blah"
+{ for i in 1 2 3 4 5 6 7 8 9; do printf 'start: %s 10:0%s:00 · type · unknown\n[10:0%s:01] piece %s text\nend: %s 10:0%s:30 · 30s · ok\n' $TD $i $i $i $TD $i; done
+  echo "clip: $TD 10:10:00 · 20261109_083630 → clips/clip-2026-11-09-083630.txt"
+  printf 'start: %s 10:11:00 · notes · /tmp/p\n[10:11:01] first sentence.\n[10:11:07] second %s\n' $TD "sentence."          # crashed: no end line
+  echo "other: $TD 10:12:00 · some-talk → other/$TD-some-talk.txt"                                                      # transcript file missing
+  printf 'start: %s 10:13:00 · type · unknown\nend: %s 10:13:00 · 0s · FAILED: mic scarlett-mic not found, see steno.log\n' $TD $TD; } > "$A/steno-$TD.txt"
+printf 'start: %s 09:00:00 · type · unknown\n[09:00:01] yesterday a\nend: %s 09:00:09 · 9s · ok\nstart: %s 09:30:00 · notes · /t\n[09:30:02] yesterday b %s\nend: %s 09:30:09 · 9s · ok\n' $YD $YD $YD "$LONG" $YD > "$A/steno-$YD.txt"
+SUM=$(find "$A" -type f | sort | xargs cat | md5sum)
 steno recall </dev/null > "$W/rc.out" 2>&1
-check "list: newest first (long one is 1, the crash is 2, the FAILED one 3)" 'sed -n 1p "$W/rc.out" | grep -qx "1. Oh yeah, I didn'"'"'t mean to blah blah blah blah blah blah blah..." && sed -n 2p "$W/rc.out" | grep -qx "2. first sentence. second sentence." && sed -n 3p "$W/rc.out" | grep -qx "3. wrote to the wrong window"'
-check "list: at most 10, reading yesterday for the rest" '[[ $(grep -cE "^[0-9]+\. " "$W/rc.out") == 10 ]] && grep -qx "4. yesterday session 9 text" "$W/rc.out" && grep -qx "10. yesterday session 3 text" "$W/rc.out" && ! grep -q "session 2 text" "$W/rc.out"'
-check "list: no clip/other lines, no empty session" '! grep -qE "clip|other|some-talk|20261108" "$W/rc.out" && ! grep -q "no speech" "$W/rc.out"'
-check "list: blurb is 60 chars then ..." 'sed -n 1p "$W/rc.out" | sed "s/^1\. //" | awk "{ exit !(length(\$0) == 63) }"'
-check "prompt shown, Enter-on-EOF copies nothing" 'grep -q "Which do you need to copy?" "$W/rc.out" && [[ ! -e $W/clip ]]'
-printf '2\n' | steno recall > "$W/rc.out" 2>&1
-check "choosing 2: full text copied and printed" '[[ $(cat "$W/clip") == "first sentence. second sentence." ]] && tail -2 "$W/rc.out" | head -1 | grep -q "recalled:$" && tail -1 "$W/rc.out" | grep -qx "first sentence. second sentence."'
-rm -f "$W/clip"; steno recall 1 </dev/null > "$W/rc.out" 2>&1
-check "recall 1: copies directly, no prompt, no list" '[[ $(cat "$W/clip") == "$LONG" ]] && ! grep -q "Which do you need" "$W/rc.out" && [[ $(grep -c . "$W/rc.out") == 2 ]] && tail -1 "$W/rc.out" | grep -qxF "$LONG"'
-rm -f "$W/clip"; steno recall 3 >/dev/null 2>&1
-check "recall 3 = the FAILED session" '[[ $(cat "$W/clip") == "wrote to the wrong window" ]]'
-rm -f "$W/clip"; printf '\n' | steno recall >/dev/null 2>&1; echo $? > "$W/rc"
-check "Enter: exit 0, nothing copied" '[[ $(cat "$W/rc") == 0 && ! -e $W/clip ]]'
-printf 'q\n' | steno recall >/dev/null 2>&1; check "q: nothing copied" '[[ ! -e $W/clip ]]'
-steno recall 99 >/dev/null 2>&1; echo $? > "$W/rc"; check "recall 99: error, nothing copied" '[[ $(cat "$W/rc") == 1 && ! -e $W/clip ]]'
-check "recall never writes the daily files" '[[ $(cat "$A"/steno-*.txt | md5sum) == "$SUM" && $(ls "$A" | wc -l) == 2 ]]'
+check "header names the file and the piece count (the empty failed session is not a piece)" '[[ $(head -1 "$W/rc.out") == "steno-$TD.txt: 12 pieces" ]]'
+check "default list: newest 10, newest first, numbered" '[[ $(grep -cE "^[0-9]+\. " "$W/rc.out") == 10 ]] && grep -qx "1. \[10:12\] other · some-talk · (no transcript)" "$W/rc.out" && grep -qx "2. \[10:11\] notes · first sentence. second sentence." "$W/rc.out" && grep -qx "10. \[10:03\] type · piece 3 text" "$W/rc.out" && ! grep -q "piece 2 text" "$W/rc.out"'
+check "a clip piece: [HH:MM] clip · source · start of the transcript text (no header, no times)" 'grep -qx "3. \[10:10\] clip · 20261109_083630 · Hello there. General Kenobi." "$W/rc.out"'
+check "prompt offers a = list all; no timestamps in any list line" 'grep -q "Which do you need to copy? (a = list all)" "$W/rc.out" && ! grep -qE "\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]" "$W/rc.out" && [[ ! -e $W/clip ]]'
+printf 'a\n11\n' | steno recall > "$W/rc.out" 2>&1
+check "a lists all 12 with the same numbering and asks again; 11 copies piece 11" '[[ $(grep -cE "^[0-9]+\. " "$W/rc.out") == 22 ]] && grep -qx "11. \[10:02\] type · piece 2 text" "$W/rc.out" && grep -qx "12. \[10:01\] type · piece 1 text" "$W/rc.out" && [[ $(grep -c "Which do you need" "$W/rc.out") == 2 ]] && [[ $(cat "$W/clip") == "piece 2 text" ]] && tail -1 "$W/rc.out" | grep -qx "piece 2 text"'
+printf '3\n' | steno recall > "$W/rc.out" 2>&1
+check "picking the clip piece copies the transcript text only: no header, no times" '[[ $(cat "$W/clip") == "Hello there. General Kenobi." ]] && tail -2 "$W/rc.out" | head -1 | grep -q "recalled:$" && tail -1 "$W/rc.out" | grep -qx "Hello there. General Kenobi."'
+rm -f "$W/clip"; printf '1\n' | steno recall > "$W/rc.out" 2>&1; echo $? > "$W/rc"
+check "missing transcript file: says so, copies nothing, exit 1" '[[ ! -e $W/clip && $(cat "$W/rc") == 1 ]] && grep -q "transcript file is missing: .*other/$TD-some-talk.txt" "$W/rc.out"'
+printf '2\n' | steno recall >/dev/null 2>&1
+check "a session piece copies its sentences joined by spaces, never timestamps" '[[ $(cat "$W/clip") == "first sentence. second sentence." ]]'
+rm -f "$W/clip"; printf '\n' | steno recall >/dev/null 2>&1; printf 'q\n' | steno recall >/dev/null 2>&1; steno recall </dev/null >/dev/null 2>&1
+check "Enter, q and EOF copy nothing" '[[ ! -e $W/clip ]]'
+printf '99\nq\n' | steno recall > "$W/rc.out" 2>&1
+check "an out-of-range number asks again instead of copying" 'grep -q "choose 1 to 12" "$W/rc.out" && [[ ! -e $W/clip ]]'
+steno recall 11 </dev/null > "$W/rc.out" 2>&1
+check "recall 11 copies piece 11 without listing" '[[ $(cat "$W/clip") == "piece 2 text" ]] && ! grep -q "Which do you need" "$W/rc.out" && [[ $(grep -c . "$W/rc.out") == 2 ]]'
+rm -f "$W/clip"; steno recall 3 >/dev/null 2>&1; check "recall 3 = the clip piece" '[[ $(cat "$W/clip") == "Hello there. General Kenobi." ]]'
+rm -f "$W/clip"; steno recall 13 >/dev/null 2>&1; echo $? > "$W/rc"; check "recall 13: error, nothing copied" '[[ $(cat "$W/rc") == 1 && ! -e $W/clip ]]'
+check "recall never writes any file" '[[ $(find "$A" -type f | sort | xargs cat | md5sum) == "$SUM" ]]'
+printf 'start: %s 10:13:00 · type · unknown\nend: %s 10:13:00 · 0s · FAILED: mic scarlett-mic not found, see steno.log\n' $TD $TD > "$A/steno-$TD.txt"
+steno recall </dev/null > "$W/rc.out" 2>&1
+check "today has no pieces: falls back to the latest day that does" '[[ $(head -1 "$W/rc.out") == "steno-$YD.txt: 2 pieces" ]] && grep -qE "^1\. \[09:30\] notes · yesterday b Oh yeah, I didn.t mean to blah.*\.\.\.$" "$W/rc.out" && grep -qx "2. \[09:00\] type · yesterday a" "$W/rc.out"'
 rm -rf "$A"; mkdir -p "$A"; steno recall </dev/null >/dev/null 2>&1; echo $? > "$W/rc"; check "nothing to recall: exit 1" '[[ $(cat "$W/rc") == 1 ]]'
 
 echo "== GNOME keybinding"

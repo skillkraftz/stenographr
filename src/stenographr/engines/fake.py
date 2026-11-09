@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 import numpy as np
 
@@ -19,6 +20,7 @@ class FakeEngine:
                 f.write(device + "\n")
         if device == "gpu" and os.environ.get("FAKE_ENGINE_FAIL_GPU") == "1":
             raise RuntimeError("fake CUDA failure")
+        time.sleep(float(os.environ.get("FAKE_ENGINE_LOAD_DELAY", "0")))     # a slow model load
         self.device = device
 
     def transcribe(self, audio: np.ndarray) -> list[dict]:
