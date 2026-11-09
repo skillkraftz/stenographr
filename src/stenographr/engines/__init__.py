@@ -19,6 +19,17 @@ class Engine(Protocol):
 
     def transcribe(self, audio: np.ndarray) -> list[Segment]: ...
 
+    def stream(self) -> "Streamer": ...
+
+
+class Streamer(Protocol):
+    """Live audio in (16 kHz mono float32, any chunk size); finished, transcribed segments out as soon
+    as the speaker pauses. flush() returns whatever is still pending."""
+
+    def accept(self, audio: np.ndarray) -> list[Segment]: ...
+
+    def flush(self) -> list[Segment]: ...
+
 
 def _parakeet(cfg: Config, device: str) -> Engine:
     from .parakeet import ParakeetEngine

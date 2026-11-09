@@ -1,0 +1,4 @@
+#!/bin/sh
+# Fake pw-dump: one source node "scarlett-mic" unless FAKE_MIC_MISSING=1.
+[ "$FAKE_MIC_MISSING" = 1 ] && { echo '[]'; exit 0; }
+echo '[{"id":42,"type":"PipeWire:Interface:Node","info":{"props":{"node.name":"scarlett-mic","media.class":"Audio/Source"}}}]'

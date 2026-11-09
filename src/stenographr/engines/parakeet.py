@@ -73,17 +73,19 @@ class ParakeetEngine:
             provider="cuda" if device == "gpu" else "cpu",
         )
 
-    def _vad_segments(self, audio: np.ndarray) -> list[tuple[float, np.ndarray]]:
+    def _make_vad(self, min_silence: float, buffer_seconds: int):
         s = self._s
         c = s.VadModelConfig()
         c.silero_vad.model = self.vad_model
         c.silero_vad.threshold = 0.5
-        c.silero_vad.min_silence_duration = 0.4
+        c.silero_vad.min_silence_duration = min_silence
         c.silero_vad.min_speech_duration = 0.25
         c.silero_vad.max_speech_duration = 25     # Parakeet is happiest on short utterances
         c.sample_rate = SR
-        vad = s.VoiceActivityDetector(c, buffer_size_in_seconds=60)
-        w = c.silero_vad.window_size
+        return s.VoiceActivityDetector(c, buffer_size_in_seconds=buffer_seconds), c.silero_vad.window_size
+
+    def _vad_segments(self, audio: np.ndarray) -> list[tuple[float, np.ndarray]]:
+        vad, w = self._make_vad(0.4, 60)
         segs: list[tuple[float, np.ndarray]] = []
 
         def drain():
@@ -99,19 +101,58 @@ class ParakeetEngine:
         drain()
         return segs
 
+    def _decode(self, batch: list[tuple[float, np.ndarray]]) -> list[dict]:
+        streams = []
+        for _, samples in batch:
+            st = self.rec.create_stream()
+            st.accept_waveform(SR, samples)
+            streams.append(st)
+        self.rec.decode_streams(streams)
+        out = []
+        for (start, samples), st in zip(batch, streams):
+            text = st.result.text.strip()
+            if text:
+                out.append({"start": start, "end": start + len(samples) / SR, "text": text})
+        return out
+
     def transcribe(self, audio: np.ndarray) -> list[dict]:
         segs = self._vad_segments(audio.astype(np.float32, copy=False))
         out = []
         for i in range(0, len(segs), self.batch):
-            batch = segs[i:i + self.batch]
-            streams = []
-            for _, samples in batch:
-                st = self.rec.create_stream()
-                st.accept_waveform(SR, samples)
-                streams.append(st)
-            self.rec.decode_streams(streams)
-            for (start, samples), st in zip(batch, streams):
-                text = st.result.text.strip()
-                if text:
-                    out.append({"start": start, "end": start + len(samples) / SR, "text": text})
+            out += self._decode(segs[i:i + self.batch])
         return out
+
+    def stream(self) -> "_Stream":
+        return _Stream(self)
+
+
+class _Stream:
+    """Live dictation: the VAD is fed as audio arrives and each segment is decoded the moment the speaker
+    pauses (0.6 s of silence)."""
+
+    def __init__(self, eng: ParakeetEngine):
+        self.eng = eng
+        self.vad, self.w = eng._make_vad(0.6, 60)
+        self.buf = np.zeros(0, dtype=np.float32)
+
+    def _drain(self) -> list[dict]:
+        out = []
+        while not self.vad.empty():
+            f = self.vad.front
+            seg = (f.start / SR, np.asarray(f.samples, dtype=np.float32))
+            self.vad.pop()
+            out += self.eng._decode([seg])
+        return out
+
+    def accept(self, audio: np.ndarray) -> list[dict]:
+        self.buf = np.concatenate([self.buf, audio.astype(np.float32, copy=False)])
+        out = []
+        while len(self.buf) >= self.w:
+            self.vad.accept_waveform(self.buf[:self.w])
+            self.buf = self.buf[self.w:]
+            out += self._drain()
+        return out
+
+    def flush(self) -> list[dict]:
+        self.vad.flush()
+        return self._drain()

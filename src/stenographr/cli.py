@@ -4,37 +4,14 @@ import argparse
 import datetime as dt
 import os
 import sys
-import time
 from pathlib import Path
 
 from . import clip as clipmod
 from . import config as configmod
-from . import device as devmod
-from .engines import gpu_runtime_available, make_engine
 from .log import Log
+from .runner import Engines, transcribe_audio
 from .srt import write_srt
-
-
-class Engines:
-    """One engine per device per run: the model load is the slow part, so build lazily and reuse."""
-
-    def __init__(self, cfg, log: Log):
-        self.cfg, self.log = cfg, log
-        self.built: dict[str, object] = {}
-        self.failed: dict[str, Exception] = {}       # a device that could not be built stays failed for the run
-
-    def get(self, device: str, name: str):
-        if device in self.failed:
-            raise self.failed[device]
-        if device not in self.built:
-            t0 = time.monotonic()
-            try:
-                self.built[device] = make_engine(self.cfg, device)
-            except Exception as e:                   # noqa: BLE001
-                self.failed[device] = e
-                raise
-            self.log.info(name, f"engine loaded: device={device} load={time.monotonic() - t0:.2f}s")
-        return self.built[device]
+from . import dictate, keybind, recall as recallmod
 
 
 def _q(path) -> str:
@@ -73,27 +50,7 @@ def _transcribe_one(cfg, log: Log, engines: Engines, video: Path, out_dir: Path,
         return
     audio = clipmod.extract_audio(video)
 
-    decision = devmod.decide(cfg, requested, gpu_runtime_available(cfg.engine))
-    device = decision.device
-    log.info(name, f"device: {device} ({decision.reason})")
-
-    segments = None
-    while segments is None:
-        try:
-            engine = engines.get(device, name)
-            t1 = time.monotonic()
-            segments = engine.transcribe(audio)
-        except Exception as e:                       # noqa: BLE001 - any engine failure
-            if device == "gpu":
-                log.error(name, f"GPU run failed, redoing on CPU: {type(e).__name__}: {e}")
-                device = "cpu"
-                continue
-            raise
-        t2 = time.monotonic()
-    audio_s = len(audio) / clipmod.SR
-    run = t2 - t1
-    log.info(name, f"timing: device={device} audio={audio_s:.1f}s transcribe={run:.2f}s "
-                   f"rtf={run / audio_s if audio_s else 0:.4f}")
+    segments, device = transcribe_audio(cfg, log, engines, name, audio, requested)
 
     txt = clipmod.render_text(video, start, duration, cfg.engine, device, segments, dt.datetime.now())
     p1, p2 = _targets(video, out_dir, start, how, cfg)
@@ -144,6 +101,44 @@ def cmd_srt(args) -> int:
     return 0
 
 
+def _cfg_log(args):
+    cfg = configmod.load(args.config)
+    return cfg, Log(cfg.archive / "steno.log")
+
+
+def cmd_toggle(args) -> int:
+    cfg, log = _cfg_log(args)
+    return dictate.toggle(cfg, log, args.device or cfg.device)
+
+
+def cmd_notes(args) -> int:
+    cfg, log = _cfg_log(args)
+    return dictate.notes(cfg, log, args.device or cfg.device)
+
+
+def cmd_recall(args) -> int:
+    cfg, _ = _cfg_log(args)
+    return recallmod.recall(cfg.archive, args.n)
+
+
+def cmd_keybinding(args) -> int:
+    import shutil
+    try:
+        if args.action == "install":
+            exe = shutil.which("stenographr")
+            if not exe:
+                print("stenographr: not on PATH, cannot build the command", file=sys.stderr)
+                return 1
+            path = keybind.install(f"{os.path.abspath(exe)} toggle")
+            print(f"installed {keybind.NAME!r} ({keybind.BINDING}) at {path}")
+        else:
+            print("removed" if keybind.remove() else "not installed")
+    except Exception as e:                               # noqa: BLE001
+        print(f"stenographr: gsettings failed: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="stenographr", description="Local speech-to-text")
     ap.add_argument("--config", help="config file (default ~/.config/stenographr/config.toml)")
@@ -157,6 +152,17 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("srt", help="write FILE.srt next to FILE.txt")
     s.add_argument("file")
     s.set_defaults(fn=cmd_srt)
+    for nm, fn, h in (("toggle", cmd_toggle, "start/stop recording; on stop type the text, copy it, log it"),
+                      ("notes", cmd_notes, "live notes in this terminal until Ctrl+C")):
+        d = sub.add_parser(nm, help=h)
+        d.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: config (auto)")
+        d.set_defaults(fn=fn)
+    r = sub.add_parser("recall", help="copy a recent dictation back to the clipboard")
+    r.add_argument("n", nargs="?", type=int, help="session number (skips the list)")
+    r.set_defaults(fn=cmd_recall)
+    k = sub.add_parser("keybinding", help="install/remove the Ctrl+` GNOME shortcut for toggle")
+    k.add_argument("action", choices=["install", "remove"])
+    k.set_defaults(fn=cmd_keybinding)
     args = ap.parse_args(argv)
     return args.fn(args)
 
