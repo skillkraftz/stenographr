@@ -1,0 +1,12 @@
+#!/bin/sh
+# Fake tmux (tests must never reach a real tmux). Every call is logged to $FAKE_TMUX_LOG as "arg|arg|...".
+#   FAKE_TMUX_CLIENTS  what `list-clients` prints (printf %b: sessions separated by \n)
+#   FAKE_TMUX_PANES    what `list-panes -a` prints: "session\tpane_id\tcommand" lines separated by \n
+#   FAKE_TMUX_SEND_FAIL=1  send-keys fails
+printf '%s|' "$@" >> "${FAKE_TMUX_LOG:-/dev/null}"; echo >> "${FAKE_TMUX_LOG:-/dev/null}"
+case $1 in
+  list-clients) [ -n "$FAKE_TMUX_CLIENTS" ] && printf '%b\n' "$FAKE_TMUX_CLIENTS" ;;
+  list-panes)   [ -n "$FAKE_TMUX_PANES" ] && printf '%b\n' "$FAKE_TMUX_PANES" ;;
+  send-keys)    [ "$FAKE_TMUX_SEND_FAIL" = 1 ] && { echo "can't find pane" >&2; exit 1; } ;;
+esac
+exit 0

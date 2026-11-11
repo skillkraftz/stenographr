@@ -11,7 +11,7 @@ from . import config as configmod
 from .log import Log
 from .runner import Engines, transcribe_audio
 from .srt import write_srt
-from . import dictate, keybind, recall as recallmod
+from . import dictate, keybind, live as livemod, recall as recallmod
 
 
 def _q(path) -> str:
@@ -106,14 +106,11 @@ def _cfg_log(args):
     return cfg, Log(cfg.archive / "steno.log")
 
 
-def cmd_toggle(args) -> int:
+def cmd_live(args) -> int:
     cfg, log = _cfg_log(args)
-    return dictate.toggle(cfg, log, args.device or cfg.device, args.config)
-
-
-def cmd_type_session(args) -> int:
-    cfg, log = _cfg_log(args)
-    return dictate.type_session(cfg, log, args.device or cfg.device)
+    if args.toggle:
+        return livemod.toggle(cfg, log, args.config)
+    return livemod.run(cfg, log, args.device or cfg.device, headless=args.headless)
 
 
 def cmd_notes(args) -> int:
@@ -134,7 +131,7 @@ def cmd_keybinding(args) -> int:
             if not exe:
                 print("stenographr: not on PATH, cannot build the command", file=sys.stderr)
                 return 1
-            path = keybind.install(f"{os.path.abspath(exe)} toggle")
+            path = keybind.install(f"{os.path.abspath(exe)} live --toggle")
             print(f"installed {keybind.NAME!r} ({keybind.BINDING}) at {path}")
         else:
             print("removed" if keybind.remove() else "not installed")
@@ -157,18 +154,19 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("srt", help="write FILE.srt next to FILE.txt")
     s.add_argument("file")
     s.set_defaults(fn=cmd_srt)
-    for nm, fn, h in (("toggle", cmd_toggle, "start/stop recording; on stop type the text, copy it, log it"),
-                      ("notes", cmd_notes, "live notes in this terminal until Ctrl+C")):
-        d = sub.add_parser(nm, help=h)
-        d.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: config (auto)")
-        d.set_defaults(fn=fn)
-    t = sub.add_parser("_type-session")                  # the background process behind `toggle`
-    t.add_argument("--device", choices=["cpu", "gpu", "auto"])
-    t.set_defaults(fn=cmd_type_session)
+    d = sub.add_parser("notes", help="live notes in this terminal until Ctrl+C")
+    d.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: config (auto)")
+    d.set_defaults(fn=cmd_notes)
+    lv = sub.add_parser("live", help="live screen: phrases as you speak, clean text when you stop (never types)")
+    lv.add_argument("--toggle", action="store_true",
+                    help="Ctrl+`: stop the running live session, or open a kitty window with one")
+    lv.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: config (auto)")
+    lv.add_argument("--headless", action="store_true", help=argparse.SUPPRESS)      # tests: no terminal needed
+    lv.set_defaults(fn=cmd_live)
     r = sub.add_parser("recall", help="copy a recent dictation back to the clipboard")
     r.add_argument("n", nargs="?", type=int, help="session number (skips the list)")
     r.set_defaults(fn=cmd_recall)
-    k = sub.add_parser("keybinding", help="install/remove the Ctrl+` GNOME shortcut for toggle")
+    k = sub.add_parser("keybinding", help="install/remove the Ctrl+` GNOME shortcut for live --toggle")
     k.add_argument("action", choices=["install", "remove"])
     k.set_defaults(fn=cmd_keybinding)
     args = ap.parse_args(argv)

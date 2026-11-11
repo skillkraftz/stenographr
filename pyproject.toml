@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Local speech-to-text"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["sherpa-onnx>=1.12", "numpy"]
+dependencies = ["sherpa-onnx>=1.12", "numpy", "textual>=0.80"]
 
 [project.optional-dependencies]
 # CUDA 13 build of sherpa-onnx (+ the NVIDIA libs it needs, ~1.6 GB of wheels; no sudo, no system CUDA).
