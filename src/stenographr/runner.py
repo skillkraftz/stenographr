@@ -18,6 +18,15 @@ class Engines:
         self.built: dict[str, object] = {}
         self.failed: dict[str, Exception] = {}       # a device that could not be built stays failed for the run
         self._lock = threading.Lock()                # the live app preloads in a thread while a capture may ask too
+        self.decided: str | None = None              # live/notes: the device is decided once (decide()); clip decides per file
+
+    def decide(self, requested: str, name: str) -> str:
+        """The device for the whole run: decided on the first call, reused after (so a capture never builds a second
+        engine because the GPU got busy since the preload)."""
+        with self._lock:
+            if self.decided is None:
+                self.decided = pick_device(self.cfg, self.log, name, requested)
+            return self.decided
 
     def get(self, device: str, name: str):
         with self._lock:                             # built once; a second caller waits for the first to finish
@@ -42,7 +51,7 @@ def pick_device(cfg, log: Log, name: str, requested: str) -> str:
 
 def transcribe_audio(cfg, log: Log, engines: Engines, name: str, audio, requested: str, method: str = "transcribe"):
     """Whole-recording transcription. A failed GPU run is redone on the CPU. Returns (segments, device)."""
-    device = pick_device(cfg, log, name, requested)
+    device = engines.decided or pick_device(cfg, log, name, requested)
     segments = None
     while segments is None:
         try:

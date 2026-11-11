@@ -120,6 +120,22 @@ end: 2026-11-10 20:07:30 · 1m30s · ok · copied
 - The start line records when, which mode (`notes` or `live`) and where the text went: the notes file for
   notes, `unknown` for live (it goes to the clipboard or a Claude pane). (Older files also have `type` sessions,
   where the window was always `unknown`: GNOME Wayland gives no window title without an extension.)
+- **One write per line (changed 2026-11-11):** every line added to a daily/notes file (session lines and `clip`
+  pointer lines) is one `write()` on an append-only file, so lines of different writers never mix inside a line.
+  Whole lines from `clip` can still land inside an open session block; `recall` skips pointer lines there and
+  the block keeps its text and its end line.
+- **Audio is written by the recorder thread (changed 2026-11-11):** the thread that reads `pw-record` is the
+  only writer of the Opus encoder, so everything recorded reaches the `.opus` even when the model fails to load
+  or transcription breaks (the block still has its start line with the audio pointer, a
+  `FAILED: engine failed|transcription error, see steno.log` end line, and the reason in steno.log).
+- **Device (changed 2026-11-11):** `live` and `notes` use the CPU by default (the GPU gives ~70 ms per phrase and
+  nothing for the clean pass, and holds ~670 MiB). `[device] device = "gpu"` in the config (or `--device gpu|auto`)
+  overrides; `auto` in the config counts as the default (CPU) for them. The device is decided once per app/run and
+  reused by every capture and clean pass. `clip` is unchanged: auto, decided before each file.
+- **clip writes both transcripts or neither (changed 2026-11-11):** if the archive copy cannot be written, the
+  sibling `.txt` is removed again, steno.log says why, the source counts as failed (`FAILED: see steno.log` line
+  in the daily file, no pointer; exit 1) and the other sources carry on. The pointer line is written only after
+  both files exist.
 - The end line records when it ended, how long the recording was (`42s`, `7m30s`, `1h02m05s`) and the
   result: `ok`, `ok (no speech)`, or `FAILED: <short reason>, see steno.log` (mic not found,
   clipboard failed, recorder exited, transcription error). A failure shows here first, with the
@@ -130,7 +146,9 @@ end: 2026-11-10 20:07:30 · 1m30s · ok · copied
 
 ## 3. Error log (BUILT for clips): `steno.log`
 - Plain text, one line per event: time, level, session or file, message. A single log; there is no
-  separate `steno.err`. (changed 2026-11-09)
+  separate `steno.err`. (changed 2026-11-09) Neither are there per-capture `.err` files: what `pw-record` prints on
+  stderr is read into steno.log (WARN, "pw-record said: ...") and ffmpeg's goes into the "audio not saved" error.
+  Cascade rule: if something is not in the daily file, steno.log says why. (changed 2026-11-11)
 - It records starts and finishes, the device chosen and why, and every error with enough detail
   to understand what happened. Purpose: if I dictate and nothing shows up, this file says why.
 

@@ -1,6 +1,0 @@
-#!/bin/sh
-# Fake ydotool: logs "args | stdin" to $FAKE_YDOTOOL_LOG; FAKE_YDOTOOL_FAIL=1 -> exit 1.
-txt=$(cat)
-echo "$* | $txt" >> "${FAKE_YDOTOOL_LOG:-/dev/null}"
-[ "$FAKE_YDOTOOL_FAIL" = 1 ] && { echo "fake ydotool: cannot connect to socket" >&2; exit 1; }
-exit 0

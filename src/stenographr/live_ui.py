@@ -23,7 +23,7 @@ from textual.widgets import Button, OptionList, RichLog, Static
 
 from . import registry, tmuxsend
 from .live import LiveSession, stop_other
-from .runner import Engines, pick_device
+from .runner import Engines
 
 BANNER = "Live preview · final text is cleaned up when you stop"
 ALL_BUTTONS = ("start", "stop", "copy", "append", "send", "new", "close", "stopit", "cancel")
@@ -227,7 +227,7 @@ class LiveApp(App):
         """Load the model in the background, once, for the app's lifetime (a capture that starts before it is
         loaded keeps all its audio: the recorder runs first and is queued)."""
         try:
-            self.engines.get(pick_device(self.cfg, self.slog, "live", self.requested), "live")
+            self.engines.get(self.engines.decide(self.requested, "live"), "live")
         except Exception as e:                         # noqa: BLE001 - a capture will fall back or report it
             self.slog.error("live", f"preloading the model failed: {type(e).__name__}: {e}")
 

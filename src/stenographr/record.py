@@ -38,12 +38,6 @@ def channel_of(raw: bytes, channel: int) -> np.ndarray:
     return np.ascontiguousarray(a[:, channel - 1])
 
 
-def window_title() -> str:
-    """The focused window's title. Not available on GNOME Wayland without an extension: Shell.Eval is
-    disabled and Introspect.GetWindows is refused, so this is always 'unknown' (see SPEC.md)."""
-    return "unknown"
-
-
 class Down3:
     """48 kHz -> 16 kHz for the VAD/model: a low-pass (63-tap Kaiser-windowed sinc, cutoff 7.4 kHz), then keep
     every third sample. Stateful, so it can be fed chunks of any size. (No resampler library needed.)"""

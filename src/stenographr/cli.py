@@ -11,7 +11,7 @@ from . import config as configmod
 from .log import Log
 from .runner import Engines, transcribe_audio
 from .srt import write_srt
-from . import dictate, keybind, live as livemod, recall as recallmod
+from . import daily, dictate, keybind, live as livemod, recall as recallmod
 
 
 def _q(path) -> str:
@@ -28,10 +28,24 @@ def _manifest(cfg, log: Log, video: Path, result: str) -> None:
     try:
         path = cfg.archive / f"steno-{now:%Y-%m-%d}.txt"
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(clipmod.manifest_line(now, clipmod.kind(video), video.stem, result))
+        daily.append_line(path, clipmod.manifest_line(now, clipmod.kind(video), video.stem, result))
     except OSError as e:
         log.error(video.name, f"could not write the daily manifest: {type(e).__name__}: {e}")
+
+
+def _write_both(log: Log, name: str, p1: Path, p2: Path, txt: str) -> None:
+    """Both transcript files or neither: if the second cannot be written, the first is removed again (and the
+    caller counts the source as failed), so a retry is never refused over a half-written pair."""
+    clipmod.write_exclusive(p1, txt)
+    try:
+        clipmod.write_exclusive(p2, txt)
+    except Exception as e:                           # noqa: BLE001
+        try:
+            p1.unlink()
+            log.error(name, f"could not write {p2} ({type(e).__name__}: {e}); removed {p1} again")
+        except OSError as e2:
+            log.error(name, f"could not write {p2} ({type(e).__name__}: {e}) and could not remove {p1}: {e2}")
+        raise
 
 
 def _transcribe_one(cfg, log: Log, engines: Engines, video: Path, out_dir: Path, requested: str,
@@ -42,8 +56,7 @@ def _transcribe_one(cfg, log: Log, engines: Engines, video: Path, out_dir: Path,
     if not clipmod.has_audio(video):
         txt = clipmod.render_text(video, start, duration, cfg.engine, "none", [], dt.datetime.now(), note="(no audio)")
         p1, p2 = _targets(video, out_dir, start, how, cfg)
-        clipmod.write_exclusive(p1, txt)
-        clipmod.write_exclusive(p2, txt)
+        _write_both(log, name, p1, p2, txt)
         log.info(name, f"finish: no audio stream, wrote placeholder {p1} and {p2}")
         _manifest(cfg, log, video, f"→ {clipmod.archive_rel(video, start, how)}")
         print(p1)
@@ -54,8 +67,7 @@ def _transcribe_one(cfg, log: Log, engines: Engines, video: Path, out_dir: Path,
 
     txt = clipmod.render_text(video, start, duration, cfg.engine, device, segments, dt.datetime.now())
     p1, p2 = _targets(video, out_dir, start, how, cfg)
-    clipmod.write_exclusive(p1, txt)
-    clipmod.write_exclusive(p2, txt)
+    _write_both(log, name, p1, p2, txt)
     log.info(name, f"finish: {len(segments)} segments, recording start from {how}; wrote {p1} and {p2}")
     _manifest(cfg, log, video, f"→ {clipmod.archive_rel(video, start, how)}")
     print(p1)
@@ -106,16 +118,21 @@ def _cfg_log(args):
     return cfg, Log(cfg.archive / "steno.log")
 
 
+def _dictation_device(cfg) -> str:
+    """live and notes use the CPU unless the config forces a device ([device] device = "gpu"); clip keeps auto."""
+    return "cpu" if cfg.device == "auto" else cfg.device
+
+
 def cmd_live(args) -> int:
     cfg, log = _cfg_log(args)
     if args.toggle:
         return livemod.toggle(cfg, log, args.config)
-    return livemod.run(cfg, log, args.device or cfg.device, popup=args.popup, headless=args.headless)
+    return livemod.run(cfg, log, args.device or _dictation_device(cfg), popup=args.popup, headless=args.headless)
 
 
 def cmd_notes(args) -> int:
     cfg, log = _cfg_log(args)
-    return dictate.notes(cfg, log, args.device or cfg.device)
+    return dictate.notes(cfg, log, args.device or _dictation_device(cfg))
 
 
 def cmd_recall(args) -> int:
@@ -155,13 +172,13 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("file")
     s.set_defaults(fn=cmd_srt)
     d = sub.add_parser("notes", help="live notes in this terminal until Ctrl+C")
-    d.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: config (auto)")
+    d.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: cpu (config [device] device overrides)")
     d.set_defaults(fn=cmd_notes)
     lv = sub.add_parser("live", help="live screen: phrases as you speak, clean text when you stop (never types)")
     lv.add_argument("--popup", action="store_true", help="the Ctrl+` popup: records at once, one capture, then closes")
     lv.add_argument("--toggle", action="store_true",
                     help="Ctrl+`: stop the recording popup, or open a popup (never touches pane instances)")
-    lv.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: config (auto)")
+    lv.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: cpu (config [device] device overrides)")
     lv.add_argument("--headless", action="store_true", help=argparse.SUPPRESS)      # tests: no terminal needed
     lv.set_defaults(fn=cmd_live)
     r = sub.add_parser("recall", help="copy a recent dictation back to the clipboard")
