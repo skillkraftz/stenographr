@@ -11,6 +11,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import clipboard
+
 from .daily import parse_sessions
 
 SHOW = 10
@@ -95,8 +97,7 @@ def label(p: Piece) -> str:
     return f"[{p.hhmm}] {p.kind} · {blurb(p.text)}"
 
 
-def _copy(text: str) -> None:
-    subprocess.run(["wl-copy"], input=text, text=True, timeout=10, check=True)
+_copy = clipboard.copy                                   # wl-copy, detached with no captured pipes (clipboard.py)
 
 
 def _show(listed: list[Piece], total: int) -> None:

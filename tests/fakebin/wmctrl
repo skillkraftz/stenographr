@@ -1,0 +1,6 @@
+#!/bin/sh
+# Fake wmctrl: logs its arguments ("arg|arg|...") to $FAKE_WMCTRL_LOG. Like the real one it finds the popup only by
+# window class (-x ... stenographr-live); anything else (e.g. a title) finds nothing: "Cannot find window", exit 1.
+printf '%s|' "$@" >> "${FAKE_WMCTRL_LOG:-/dev/null}"; echo >> "${FAKE_WMCTRL_LOG:-/dev/null}"
+[ "$1" = "-x" ] && case " $* " in *" stenographr-live "*) exit 0 ;; esac
+echo "Cannot find window" >&2; exit 1

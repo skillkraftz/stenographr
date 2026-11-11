@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from . import audio as audiomod
-from . import daily
+from . import clipboard, daily
 from .log import Log
 from .record import Down3, channel_of, mic_exists, recorder_cmd
 from .runner import Engines, pick_device
@@ -33,9 +33,7 @@ def _fail_block(cfg, log: Log, name: str, mode: str, where: str, start: dt.datet
     s.end(dt.datetime.now(), daily.failed(reason))
 
 
-def _copy(text: str) -> None:
-    # wl-copy forks to serve the selection, so don't capture its output (the pipe would stay open)
-    subprocess.run(["wl-copy"], input=text, text=True, timeout=10, check=True)
+_copy = clipboard.copy                                   # wl-copy, detached with no captured pipes (clipboard.py)
 
 
 def _state_dir() -> Path:

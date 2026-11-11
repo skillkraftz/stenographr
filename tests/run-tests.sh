@@ -240,7 +240,7 @@ check "missing file: error, next file still done" '[[ $(cat "$W/rc") == 1 && -f 
 # ======================================================================= dictation
 export XDG_CONFIG_HOME=$W/xdg GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null   # the user's global gitignore must not matter
 export XDG_RUNTIME_DIR=$W/run FAKE_PW_LOG=$W/pw.log FAKE_YDOTOOL_LOG=$W/ydo.log FAKE_CLIP=$W/clip FAKE_GSETTINGS=$W/gs
-dfresh() { fresh; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null; rm -rf "$XDG_RUNTIME_DIR" "$W/pw.log" "$W/ydo.log" "$W/clip" "$W/gate"; unset HB_CLAUDE_PANE TMUX_PANE FAKE_TMUX_SESSENV FAKE_TMUX_SESSION FAKE_MIC_MISSING FAKE_PW_FAIL FAKE_YDOTOOL_FAIL FAKE_ENGINE_TEXT FAKE_ENGINE_SECONDS FAKE_PW_GATE FAKE_PW_CHUNKS FAKE_ENGINE_LOAD_DELAY FAKE_ENGINE_CLEAN_TEXT FAKE_ENGINE_CLEAN_SECONDS FAKE_ENGINE_CLEAN_FAIL FAKE_TMUX_CLIENTS FAKE_TMUX_PANES FAKE_TMUX_SEND_FAIL; rm -f "$W/tmux.log" "$W/kitty.log" "$W/sig"; }
+dfresh() { fresh; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null; rm -rf "$XDG_RUNTIME_DIR" "$W/pw.log" "$W/ydo.log" "$W/clip" "$W/gate"; unset HB_CLAUDE_PANE TMUX_PANE FAKE_TMUX_SESSENV FAKE_TMUX_SESSION FAKE_MIC_MISSING FAKE_PW_FAIL FAKE_YDOTOOL_FAIL FAKE_ENGINE_TEXT FAKE_ENGINE_SECONDS FAKE_PW_GATE FAKE_PW_CHUNKS FAKE_ENGINE_LOAD_DELAY FAKE_ENGINE_CLEAN_TEXT FAKE_ENGINE_CLEAN_SECONDS FAKE_ENGINE_CLEAN_FAIL FAKE_TMUX_CLIENTS FAKE_TMUX_PANES FAKE_TMUX_SEND_FAIL; rm -f "$W/tmux.log" "$W/kitty.log" "$W/wmctrl.log" "$W/wlcopy.log" "$W/sig"; unset FAKE_WLCOPY_HOLD; }
 DAILY=$A/steno-$(date +%F).txt
 BLK='[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}'
 
@@ -250,7 +250,7 @@ endn() { local n; n=$(grep -c '^end:' "$DAILY" 2>/dev/null); echo "${n:-0}"; }
 plus() { date -d "$(date +%F) $1 $2 seconds" +%T; }            # plus HH:MM:SS N -> HH:MM:SS + N seconds
 TS='\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]'
 
-export FAKE_TMUX_LOG=$W/tmux.log FAKE_KITTY_LOG=$W/kitty.log
+export FAKE_TMUX_LOG=$W/tmux.log FAKE_KITTY_LOG=$W/kitty.log FAKE_WMCTRL_LOG=$W/wmctrl.log FAKE_WLCOPY_LOG=$W/wlcopy.log
 LIVEARGS="live --popup --headless --device cpu"
 lpy() { "$PY" - "$@"; }                                   # python with the stenographr package + this test's env
 LPRE='
@@ -286,6 +286,8 @@ fakeinst() {   # fakeinst NAME KIND RECORDING WHERE: a stand-in instance (counts
 dfresh
 steno live --toggle; echo $? > "$W/rc"
 check "no popup open: kitty is launched once, 80x25 cells, titled, size not remembered, running 'stenographr live --popup'" '[[ $(cat "$W/rc") == 0 && $(grep -c . "$W/kitty.log") == 1 ]] && grep -qF -- "--title|stenographr live|" "$W/kitty.log" && grep -qF -- "-o|initial_window_width=80c|-o|initial_window_height=25c|-o|remember_window_size=no|" "$W/kitty.log" && grep -qE "\|-m\|stenographr.cli\|live\|--popup\|$" "$W/kitty.log"'
+waitfor '[[ -s $W/wmctrl.log ]]'
+check "the popup opens under XWayland (-o linux_display_server=x11) and gets marked always-on-top (-x -r by window class, -b add,above)" 'grep -qF -- "linux_display_server=x11" "$W/kitty.log" && grep -qxF -- "-x|-r|stenographr-live|-b|add,above|" "$W/wmctrl.log"'
 steno live --toggle
 check "pressed again before the popup has registered: no second window" '[[ $(grep -c . "$W/kitty.log") == 1 ]]'
 dfresh; mkdir -p "$REG"; echo '{"pid": 999999, "kind": "popup", "where": "popup", "recording": true, "started": 0}' > "$REG/999999.json"
@@ -296,7 +298,10 @@ steno live --toggle; waitfor '[[ -s $W/sig.pop ]]'
 check "a popup is recording: Ctrl+backtick stops it (SIGUSR1), no window opened" '[[ $(cat "$W/sig.pop") == got && ! -e $W/kitty.log ]]'
 rm -f "$W/sig.pop"; printf '{"pid": %s, "kind": "popup", "where": "popup", "recording": false, "started": 0}' "$PP" > "$REG/$PP.json"
 steno live --toggle; sleep 0.4
-check "that popup is now at its button step: Ctrl+backtick does nothing (no signal, no new window)" '[[ ! -e $W/sig.pop && ! -e $W/kitty.log ]]'
+check "that popup is now at its button step: Ctrl+backtick raises it (-x -a, by window class), no stop signal, no new window" '[[ ! -e $W/sig.pop && ! -e $W/kitty.log ]] && grep -qxF -- "-x|-a|stenographr-live|" "$W/wmctrl.log"'
+rm -f "$W/wmctrl.log"; printf '{"pid": %s, "kind": "popup", "where": "popup", "recording": true, "started": 0}' "$PP" > "$REG/$PP.json"
+steno live --toggle; waitfor '[[ -s $W/sig.pop ]]'
+check "the popup is recording again: Ctrl+backtick stops it and does not raise it" '[[ $(cat "$W/sig.pop") == got && ! -e $W/wmctrl.log ]]'
 kill $PP 2>/dev/null; wait $PP 2>/dev/null
 dfresh; rm -f "$W"/sig.*; fakeinst ready loop false alpha; L1=$FPID; fakeinst rec loop true beta; L2=$FPID
 steno live --toggle; sleep 0.4
@@ -703,6 +708,11 @@ check "popup opening while a pane instance records: notice names its tmux sessio
 kill $L 2>/dev/null; wait $L 2>/dev/null
 unset FAKE_ENGINE_TEXT FAKE_ENGINE_CLEAN_TEXT FAKE_ENGINE_CLEAN_SECONDS
 
+dfresh; export FAKE_WLCOPY_HOLD=4
+T1=$(date +%s); OUTC=$("$PY" -c "from stenographr import dictate, recall; dictate._copy('hello world'); recall._copy('hello world')"); T2=$(date +%s)
+check "wl-copy: Copy returns at once although wl-copy leaves a background process (nothing of ours is held open, so a caller waiting on the output pipe is not stuck)" '(( T2 - T1 < 3 )) && [[ $(grep -c . "$W/wlcopy.log") == 2 ]] && [[ $(cat "$W/clip") == "hello world" ]]'
+check "wl-copy: started with stdout/stderr on /dev/null (no captured pipes) and in its own process group (a closing window does not take it down)" 'grep -qx "out=/dev/null err=/dev/null own_group=yes" "$W/wlcopy.log"'
+unset FAKE_WLCOPY_HOLD
 echo "== live: the window goes away"
 dfresh; mkdir -p "$W/gate"; export FAKE_ENGINE_TEXT="one|two|three" FAKE_ENGINE_CLEAN_TEXT="Clean {secs} seconds." FAKE_ENGINE_CLEAN_SECONDS=100 FAKE_PW_GATE=$W/gate
 "$PY" -m stenographr.cli $LIVEARGS >/dev/null 2>&1 & LP=$!
