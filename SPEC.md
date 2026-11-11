@@ -192,11 +192,11 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
     other instance (it stops, shows its own clean text and buttons, and stays open: it is never closed or killed),
     waits until it has let go of the microphone, then records here. Cancel: a popup closes, a loop goes back to Ready.
   - **Ctrl+` (`stenographr live --toggle`) only ever looks at popups.** A popup is recording -> it is stopped
-    (SIGUSR1). A popup exists in any other state (notice, cleaning, buttons) -> it is raised and focused (`wmctrl -a "stenographr live"`). No popup (and none was
+    (SIGUSR1). A popup exists in any other state (notice, cleaning, buttons) -> it is raised and focused (`wmctrl -x -a stenographr-live`). No popup (and none was
     launched in the last 10 s) -> kitty opens a window, 80x25, titled "stenographr live" (`-o initial_window_width=80c
     -o initial_window_height=25c -o remember_window_size=no -o linux_display_server=x11`: the popup only runs under XWayland), running
-    `stenographr live --popup`, and a detached `wmctrl -r "stenographr live" -b add,above` (retried for ~10 s until the window
-    exists) keeps it on top. Loop instances, ready or recording, are never signalled. Needs `wmctrl`.
+    `stenographr live --popup`, and a detached `wmctrl -x -r stenographr-live -b add,above` (retried for ~10 s until the window
+    exists) keeps it on top. Loop instances, ready or recording, are never signalled. Needs `wmctrl`. The window is found by its class (`--class stenographr-live`, `wmctrl -x`), not its title: titles match by substring, so a browser tab named like the popup could be hit.
   - After "Cleaning up…": the session's 16 kHz audio is kept in memory while recording (the same samples the audio file
     got) and decoded once at the end by `engine.transcribe_long` (the **clean pass**): Silero VAD with 0.3 s pauses and a
     30 s cap, neighbouring segments merged into chunks of up to ~30 s and cut only at the longest pauses, each chunk

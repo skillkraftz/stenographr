@@ -287,7 +287,7 @@ dfresh
 steno live --toggle; echo $? > "$W/rc"
 check "no popup open: kitty is launched once, 80x25 cells, titled, size not remembered, running 'stenographr live --popup'" '[[ $(cat "$W/rc") == 0 && $(grep -c . "$W/kitty.log") == 1 ]] && grep -qF -- "--title|stenographr live|" "$W/kitty.log" && grep -qF -- "-o|initial_window_width=80c|-o|initial_window_height=25c|-o|remember_window_size=no|" "$W/kitty.log" && grep -qE "\|-m\|stenographr.cli\|live\|--popup\|$" "$W/kitty.log"'
 waitfor '[[ -s $W/wmctrl.log ]]'
-check "the popup opens under XWayland (-o linux_display_server=x11) and gets marked always-on-top (wmctrl -r <title> -b add,above)" 'grep -qF -- "linux_display_server=x11" "$W/kitty.log" && grep -qxF -- "-r|stenographr live|-b|add,above|" "$W/wmctrl.log"'
+check "the popup opens under XWayland (-o linux_display_server=x11) and gets marked always-on-top (-x -r by window class, -b add,above)" 'grep -qF -- "linux_display_server=x11" "$W/kitty.log" && grep -qxF -- "-x|-r|stenographr-live|-b|add,above|" "$W/wmctrl.log"'
 steno live --toggle
 check "pressed again before the popup has registered: no second window" '[[ $(grep -c . "$W/kitty.log") == 1 ]]'
 dfresh; mkdir -p "$REG"; echo '{"pid": 999999, "kind": "popup", "where": "popup", "recording": true, "started": 0}' > "$REG/999999.json"
@@ -298,7 +298,7 @@ steno live --toggle; waitfor '[[ -s $W/sig.pop ]]'
 check "a popup is recording: Ctrl+backtick stops it (SIGUSR1), no window opened" '[[ $(cat "$W/sig.pop") == got && ! -e $W/kitty.log ]]'
 rm -f "$W/sig.pop"; printf '{"pid": %s, "kind": "popup", "where": "popup", "recording": false, "started": 0}' "$PP" > "$REG/$PP.json"
 steno live --toggle; sleep 0.4
-check "that popup is now at its button step: Ctrl+backtick raises it (wmctrl -a by its title), no stop signal, no new window" '[[ ! -e $W/sig.pop && ! -e $W/kitty.log ]] && grep -qxF -- "-a|stenographr live|" "$W/wmctrl.log"'
+check "that popup is now at its button step: Ctrl+backtick raises it (-x -a, by window class), no stop signal, no new window" '[[ ! -e $W/sig.pop && ! -e $W/kitty.log ]] && grep -qxF -- "-x|-a|stenographr-live|" "$W/wmctrl.log"'
 rm -f "$W/wmctrl.log"; printf '{"pid": %s, "kind": "popup", "where": "popup", "recording": true, "started": 0}' "$PP" > "$REG/$PP.json"
 steno live --toggle; waitfor '[[ -s $W/sig.pop ]]'
 check "the popup is recording again: Ctrl+backtick stops it and does not raise it" '[[ $(cat "$W/sig.pop") == got && ! -e $W/wmctrl.log ]]'

@@ -36,7 +36,8 @@ from .record import SR, mic_exists
 from .runner import Engines, transcribe_audio
 
 NAME = "live"
-TITLE = "stenographr live"                          # the popup window's title (wmctrl finds it by this)
+TITLE = "stenographr live"                          # the popup window's title
+WM_CLASS = "stenographr-live"                       # its window class: wmctrl -x finds it by this (a title could match a browser tab)
 WORDS = {"copy": "copied", "new": "new take", "close": "closed"}       # append/send: "appended to / sent to claude <session>"
 
 
@@ -77,7 +78,7 @@ def toggle(cfg, log: Log, config_arg: str | None = None) -> int:
         log.error(NAME, "kitty not found: cannot open the live window")
         return 1
     registry.mark_launching()
-    cmd = [kitty, "--title", TITLE, "--class", "stenographr-live",
+    cmd = [kitty, "--title", TITLE, "--class", WM_CLASS,
            "-o", "linux_display_server=x11",       # XWayland, popup only: wmctrl can then raise it / keep it on top
            "-o", "initial_window_width=80c", "-o", "initial_window_height=25c", "-o", "remember_window_size=no",
            sys.executable, "-m", "stenographr.cli"] + (["--config", config_arg] if config_arg else []) + ["live", "--popup"]
@@ -91,7 +92,7 @@ def toggle(cfg, log: Log, config_arg: str | None = None) -> int:
 def raise_popup(log: Log) -> None:
     """Bring the popup to the front and give it focus (wmctrl -a, by its window title)."""
     try:
-        r = subprocess.run(["wmctrl", "-a", TITLE], capture_output=True, text=True, timeout=5)
+        r = subprocess.run(["wmctrl", "-x", "-a", WM_CLASS], capture_output=True, text=True, timeout=5)
         log.info(NAME, "raised the popup" if r.returncode == 0
                  else f"could not raise the popup: {r.stderr.strip()[:100]}")
     except (OSError, subprocess.SubprocessError) as e:
@@ -100,7 +101,7 @@ def raise_popup(log: Log) -> None:
 
 def _keep_on_top() -> None:
     """Detached: once the popup's window exists, mark it always-on-top (gives up after ~10 s)."""
-    sh = f'for i in $(seq 40); do wmctrl -r "{TITLE}" -b add,above && exit 0; sleep 0.25; done'
+    sh = f'for i in $(seq 40); do wmctrl -x -r {WM_CLASS} -b add,above && exit 0; sleep 0.25; done'
     subprocess.Popen(["sh", "-c", sh], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL, start_new_session=True)
 
