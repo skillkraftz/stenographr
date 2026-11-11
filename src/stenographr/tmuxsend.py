@@ -1,7 +1,9 @@
 """Find a Claude Code pane in tmux and type text into its input box. Uses the tmux command directly (no hyperbeam).
 
 A Claude pane is one whose `pane_current_command` is `claude` (the same rule hyperbeam uses). Text goes in with
-`tmux send-keys -l`, which appends to what is already in the input and never submits: this module never sends Enter.
+`tmux send-keys -l`, which appends to what is already in the input. Two ways in (the only place Enter is ever sent):
+  append  the text plus one trailing space; no Enter, so several takes can be appended
+  send    the text, then `send-keys Enter` (the way hyperbeam's send_line does it): submits everything now in the input
 """
 from __future__ import annotations
 
@@ -51,9 +53,14 @@ def choose_target() -> tuple[str | None, dict[str, str]]:
     return None, panes
 
 
-def send(pane: str, text: str) -> None:
-    """Type `text`, as one line, into the pane's input. Never presses Enter."""
+def send(pane: str, text: str, enter: bool = False) -> None:
+    """Type `text`, as one line, into the pane's input. enter=False (append): add one trailing space and stop.
+    enter=True (send): no trailing space, then press Enter once."""
     line = " ".join(text.split())
+    if not enter:
+        line += " "
     r = _tmux("send-keys", "-t", pane, "-l", "--", line)
+    if r.returncode == 0 and enter:
+        r = _tmux("send-keys", "-t", pane, "Enter")
     if r.returncode != 0:
         raise RuntimeError(f"tmux send-keys failed: {r.stderr.strip()[:200]}")

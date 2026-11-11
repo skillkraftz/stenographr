@@ -14,7 +14,7 @@ Daily block:
   [HH:MM:SS] <live phrase>        (as they come, so a crash keeps everything said)
   clean:
   [HH:MM:SS] <clean sentence or paragraph>
-  end: ... · 1m30s · ok · copied          (copied | sent to claude <session> | new take | closed)
+  end: ... · 1m30s · ok · copied   (copied | appended to claude <session> | sent to claude <session> | new take | closed)
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ from .record import SR, mic_exists
 from .runner import Engines, transcribe_audio
 
 NAME = "live"
-WORDS = {"copy": "copied", "new": "new take", "close": "closed"}       # claude: "sent to claude <session>"
+WORDS = {"copy": "copied", "new": "new take", "close": "closed"}       # append/send: "appended to / sent to claude <session>"
 
 
 def detect_where(popup: bool) -> str:
@@ -180,25 +180,26 @@ class LiveSession:
 
     # -- the user's choice
     def deliver(self, choice: str, claude_session: str | None = None) -> str:
-        """choice: copy | claude | new | close. Writes the end line and returns it
-        ('ok · copied', 'ok · sent to claude alpha', 'ok · new take', 'ok · closed', 'FAILED: ...')."""
+        """choice: copy | append | send | new | close. Writes the end line and returns it ('ok · copied',
+        'ok · appended to claude alpha', 'ok · sent to claude alpha', 'ok · new take', 'ok · closed', 'FAILED: ...').
+        Copy and append add one trailing space (so the next take, or typing, starts clean); send presses Enter."""
         r = self.result
         base = r.status if r else daily.failed("recording failed")
         text = self.text()
         how, problem = WORDS.get(choice, "closed"), None
         if choice == "copy" and text:
             try:
-                _copy(text)
+                _copy(text + " ")
             except Exception as e:                 # noqa: BLE001
                 self.log.error(NAME, f"clipboard (wl-copy) failed: {type(e).__name__}: {e}")
                 problem = "clipboard failed"
-        elif choice == "claude" and text:
+        elif choice in ("append", "send") and text:
             try:
-                tmuxsend.send(tmuxsend.claude_panes()[claude_session], text)
-                how = f"sent to claude {claude_session}"
+                tmuxsend.send(tmuxsend.claude_panes()[claude_session], text, enter=(choice == "send"))
+                how = f"{'sent' if choice == 'send' else 'appended'} to claude {claude_session}"
             except Exception as e:                 # noqa: BLE001
-                self.log.error(NAME, f"send to claude {claude_session} failed: {type(e).__name__}: {e}")
-                problem = "send to claude failed"
+                self.log.error(NAME, f"{choice} to claude {claude_session} failed: {type(e).__name__}: {e}")
+                problem = f"{choice} to claude failed"
         if not text:
             status = base
         elif problem:
