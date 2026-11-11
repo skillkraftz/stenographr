@@ -57,7 +57,7 @@ class LiveResult:
 
 def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targets, on_sentence,
           before_end=None, stop_event: "threading.Event | None" = None, signals: bool = True,
-          finish: bool = True, keep_pcm: bool = False) -> LiveResult:
+          finish: bool = True, keep_pcm: bool = False, engines: "Engines | None" = None) -> LiveResult:
     """Record from the mic and turn speech into sentences as the speaker pauses.
 
     The audio is kept: recorded at 48 kHz, channel 1 only, encoded to Ogg/Opus while recording (audio.py), and
@@ -103,7 +103,7 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
     texts: list[str] = []
     pcm: list = []
     status = daily.ok()
-    engines = Engines(cfg, log)
+    engines = engines or Engines(cfg, log)           # `live` passes its app-lifetime engines (model loaded once)
 
     def emit(segs):
         for s in segs:
