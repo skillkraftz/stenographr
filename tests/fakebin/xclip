@@ -1,0 +1,5 @@
+#!/bin/sh
+# Fake xclip: the "clipboard" is the file $FAKE_CLIP; logs its arguments to $FAKE_XCLIP_LOG.
+echo "$*" >> "${FAKE_XCLIP_LOG:-/dev/null}"
+cat > "$FAKE_CLIP"
+exit 0

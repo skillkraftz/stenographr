@@ -28,7 +28,7 @@ without activating a venv. Runs locally; no network at runtime (models are downl
 | `src/stenographr/keybind.py` | The GNOME Ctrl+` keybinding (touches only its own entry) |
 | `src/stenographr/log.py` | `<archive>/steno.log` |
 | `SPEC.md` | The spec: layout, formats, what is built and what is open |
-| `tests/` | `run-tests.sh`; fakes in `tests/fakebin/` (nvidia-smi, ffmpeg (clip extraction and the Opus encoder), ffprobe, pw-record, pw-dump, wl-copy, wmctrl, gsettings, tmux, kitty) and a fake engine |
+| `tests/` | `run-tests.sh`; fakes in `tests/fakebin/` (nvidia-smi, ffmpeg (clip extraction and the Opus encoder), ffprobe, pw-record, pw-dump, wl-copy, xclip, wmctrl, gsettings, tmux, kitty) and a fake engine |
 | `bench/` | Benchmark script (real data, outputs to /tmp only) |
 
 ## Tests

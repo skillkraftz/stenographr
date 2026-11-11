@@ -2,6 +2,7 @@
 # Fake wl-copy: the "clipboard" is the file $FAKE_CLIP. Like the real one it can leave a background process that keeps
 # its stdout/stderr open ($FAKE_WLCOPY_HOLD seconds), and it logs where its output goes and whether it leads its own
 # process group, to $FAKE_WLCOPY_LOG.
+[ "$FAKE_WLCOPY_HANG" = 1 ] && exec sleep 30      # like GNOME without Wayland keyboard focus: never takes the text
 cat > "$FAKE_CLIP"
 [ -n "$FAKE_WLCOPY_LOG" ] && echo "out=$(readlink /proc/$$/fd/1) err=$(readlink /proc/$$/fd/2) own_group=$([ "$(ps -o pgid= -p $$ | tr -d ' ')" = "$$" ] && echo yes || echo no)" >> "$FAKE_WLCOPY_LOG"
 [ -n "$FAKE_WLCOPY_HOLD" ] && { sleep "$FAKE_WLCOPY_HOLD" & }
