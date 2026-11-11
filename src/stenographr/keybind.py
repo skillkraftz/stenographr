@@ -1,4 +1,4 @@
-"""The GNOME custom keybinding for `stenographr toggle`. Only ever touches its own entry."""
+"""The GNOME custom keybinding for `stenographr live --toggle`. Only ever touches its own entry."""
 from __future__ import annotations
 
 import ast

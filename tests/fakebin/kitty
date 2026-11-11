@@ -1,0 +1,3 @@
+#!/bin/sh
+# Fake kitty: logs its arguments ("arg|arg|...") to $FAKE_KITTY_LOG and opens nothing.
+printf '%s|' "$@" >> "${FAKE_KITTY_LOG:-/dev/null}"; echo >> "${FAKE_KITTY_LOG:-/dev/null}"

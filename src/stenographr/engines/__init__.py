@@ -21,6 +21,11 @@ class Engine(Protocol):
 
     def stream(self) -> "Streamer": ...
 
+    def transcribe_long(self, audio: np.ndarray) -> list[Segment]:
+        """One pass over a whole dictation session (16 kHz mono): segments that are whole sentences/paragraphs
+        (unlike `stream`, which cuts at every short pause). Used for the clean text when a live session ends."""
+        ...
+
 
 class Streamer(Protocol):
     """Live audio in (16 kHz mono float32, any chunk size); finished, transcribed segments out as soon

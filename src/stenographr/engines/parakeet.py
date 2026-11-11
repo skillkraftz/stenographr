@@ -17,6 +17,26 @@ MODEL_DIR = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
 VAD_FILE = "silero_vad.onnx"
 
 
+CHUNK_S = 30   # longest chunk of the clean pass, seconds
+
+
+def merge_spans(spans: list[tuple[float, float]], max_s: float) -> list[tuple[float, float]]:
+    """Merge consecutive speech spans (start, end) into chunks of at most ~max_s, splitting only at the longest
+    pauses: when the window grows past max_s it is cut at its widest gap."""
+    out: list[list[tuple[float, float]]] = []
+    win: list[tuple[float, float]] = []
+    for sp in spans:
+        win.append(sp)
+        while win[-1][1] - win[0][0] > max_s and len(win) > 1:
+            gaps = [win[i + 1][0] - win[i][1] for i in range(len(win) - 1)]
+            i = gaps.index(max(gaps))
+            out.append(win[:i + 1])
+            win = win[i + 1:]
+    if win:
+        out.append(win)
+    return [(w[0][0], w[-1][1]) for w in out]
+
+
 def gpu_runtime_available() -> bool:
     """True only for a CUDA build of sherpa-onnx (the plain PyPI wheel is CPU-only and would
     silently fall back to CPU if asked for `cuda`, which would make 'gpu' benchmarks lie)."""
@@ -73,14 +93,14 @@ class ParakeetEngine:
             provider="cuda" if device == "gpu" else "cpu",
         )
 
-    def _make_vad(self, min_silence: float, buffer_seconds: int):
+    def _make_vad(self, min_silence: float, buffer_seconds: int, max_speech: float = 25):
         s = self._s
         c = s.VadModelConfig()
         c.silero_vad.model = self.vad_model
         c.silero_vad.threshold = 0.5
         c.silero_vad.min_silence_duration = min_silence
         c.silero_vad.min_speech_duration = 0.25
-        c.silero_vad.max_speech_duration = 25     # Parakeet is happiest on short utterances
+        c.silero_vad.max_speech_duration = max_speech   # Parakeet is happiest on short utterances
         c.sample_rate = SR
         return s.VoiceActivityDetector(c, buffer_size_in_seconds=buffer_seconds), c.silero_vad.window_size
 
@@ -120,6 +140,31 @@ class ParakeetEngine:
         out = []
         for i in range(0, len(segs), self.batch):
             out += self._decode(segs[i:i + self.batch])
+        return out
+
+    def transcribe_long(self, audio: np.ndarray) -> list[dict]:
+        """VAD with short pauses (0.3 s) and a 30 s cap, then neighbouring segments are merged into chunks of up to
+        ~30 s, split only at the longest pauses, and each chunk is decoded in one go. That keeps sentences whole
+        (the live stream cuts at every 0.6 s pause and loses the context). A 30 s chunk fits a 4 GB GPU easily
+        (~1.2 GB peak measured, 60 s chunks too); batch size 1."""
+        audio = audio.astype(np.float32, copy=False)
+        vad, w = self._make_vad(0.3, 120, CHUNK_S)
+        spans: list[tuple[float, float]] = []
+
+        def drain():
+            while not vad.empty():
+                f = vad.front
+                spans.append((f.start / SR, f.start / SR + len(f.samples) / SR))
+                vad.pop()
+
+        for i in range(0, len(audio) - w + 1, w):
+            vad.accept_waveform(audio[i:i + w])
+            drain()
+        vad.flush()
+        drain()
+        out = []
+        for start, end in merge_spans(spans, CHUNK_S):
+            out += self._decode([(start, audio[int(start * SR):int(end * SR)])])
         return out
 
     def stream(self) -> "_Stream":

@@ -72,6 +72,10 @@ class Session:
         prefix = f"[{when:%H:%M:%S}] " if when else ""
         self._write(prefix + " ".join(text.split()) + "\n")
 
+    def marker(self, text: str) -> None:
+        """A bare label line such as `clean:`."""
+        self._write(text + "\n")
+
     def end(self, when: dt.datetime, status: str) -> None:
         self._write(f"end: {stamp(when)}{_SEP}{fmt_dur((when - self.start).total_seconds())}{_SEP}{status}\n")
 
@@ -87,6 +91,8 @@ class Parsed:
     day: str
     hhmm: str = ""          # time of day the session started
     audio: str = ""         # 'audio/<file>.opus', 'audio: none', or '' (older files)
+    live: str = ""          # the live phrases (a `live` session also has a clean block)
+    clean: str = ""         # the cleaned-up text after a `clean:` line, if there is one
 
 
 _START = re.compile(r"^start: \S+ (\d\d:\d\d):\d\d · (\w+) · (.*?)(?: · (audio/\S+|audio: none))?$")
@@ -104,7 +110,10 @@ def parse_sessions(text: str, day: str = "") -> list[Parsed]:
     def close():
         nonlocal cur
         if cur:
-            out.append(Parsed(cur["mode"], cur["where"], " ".join(cur["lines"]).strip(), cur["status"], day, cur["hhmm"], cur["audio"]))
+            live = " ".join(cur["lines"]).strip()
+            clean = " ".join(cur["clean"]).strip()
+            out.append(Parsed(cur["mode"], cur["where"], clean or live, cur["status"], day, cur["hhmm"], cur["audio"],
+                              live, clean))
         cur = None
 
     for line in text.splitlines():
@@ -112,13 +121,15 @@ def parse_sessions(text: str, day: str = "") -> list[Parsed]:
         if m:
             close()
             cur = {"hhmm": m.group(1), "mode": m.group(2), "where": m.group(3), "audio": m.group(4) or "",
-                   "lines": [], "status": None}
+                   "lines": [], "clean": [], "in_clean": False, "status": None}
         elif cur is not None and _END.match(line):
             cur["status"] = _END.match(line).group(1)
             close()
         elif _POINTER.match(line):
             close()
+        elif cur is not None and line.strip() == "clean:":
+            cur["in_clean"] = True                       # what follows is the cleaned-up text; recall prefers it
         elif cur is not None and line.strip():
-            cur["lines"].append(_STAMP.sub("", line.strip()))
+            cur["clean" if cur["in_clean"] else "lines"].append(_STAMP.sub("", line.strip()))
     close()
     return out

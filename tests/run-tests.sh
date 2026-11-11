@@ -7,7 +7,7 @@ W=$(mktemp -d); trap 'jobs -p | xargs -r kill 2>/dev/null; pkill -f "$HERE/fakeb
 PY=${STENO_PY:-}
 [[ -z $PY && -x $(uv tool dir 2>/dev/null)/stenographr/bin/python ]] && PY=$(uv tool dir)/stenographr/bin/python
 [[ -z $PY ]] && PY=python3
-"$PY" -c 'import numpy' 2>/dev/null || { echo "need a python with numpy (set STENO_PY)"; exit 2; }
+"$PY" -c 'import numpy, textual' 2>/dev/null || { echo "need a python with numpy and textual (set STENO_PY)"; exit 2; }
 
 export PATH=$HERE/fakebin:$PATH PYTHONPATH=$PROJECT/src PYTHONDONTWRITEBYTECODE=1
 export STENOGRAPHR_CONFIG=$W/config.toml FAKE_SMI_SEQ=
@@ -15,7 +15,7 @@ A=$W/archive; OUT=$W/out; LOG=$A/steno.log
 pass=0 fail=0
 ok()  { pass=$((pass+1)); echo "  ok   $1"; }
 bad() { fail=$((fail+1)); echo "  FAIL $1"; }
-check() { if eval "$2"; then ok "$1"; else bad "$1   [$2]"; fi; }
+check() { if eval "$2"; then ok "$1"; else bad "$1   [$2]"; [[ -n $STENO_TEST_DEBUG ]] && { echo "--- daily:"; cat "$DAILY" 2>/dev/null | cut -c1-120; echo "--- log tail:"; tail -8 "$LOG" 2>/dev/null | cut -c1-150; echo "---"; }; fi; }
 mkconf() { printf '[paths]\narchive = "%s"\nmodels = "%s/models"\n[engine]\nname = "fake"\n[device]\nvram_need_mib = 2000\nvram_margin_mib = 500\nmax_gpu_util_pct = 30\nbusy_processes = ["steno-test-busy"]\n%s\n' "$A" "$W" "$1" > "$W/config.toml"; }
 steno() { "$PY" -m stenographr.cli "$@"; }
 fresh() { rm -rf "$A" "$OUT"; : > "$W/rc"; unset FAKE_SMI FAKE_SMI_FAIL FAKE_ENGINE_FAIL_GPU FAKE_ENGINE_GPU FAKE_FF_FAIL FAKE_FF_NOAUDIO; export FAKE_SMI_SEQ=; }
@@ -240,7 +240,7 @@ check "missing file: error, next file still done" '[[ $(cat "$W/rc") == 1 && -f 
 # ======================================================================= dictation
 export XDG_CONFIG_HOME=$W/xdg GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null   # the user's global gitignore must not matter
 export XDG_RUNTIME_DIR=$W/run FAKE_PW_LOG=$W/pw.log FAKE_YDOTOOL_LOG=$W/ydo.log FAKE_CLIP=$W/clip FAKE_GSETTINGS=$W/gs
-dfresh() { fresh; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null; rm -rf "$XDG_RUNTIME_DIR" "$W/pw.log" "$W/ydo.log" "$W/clip" "$W/gate"; unset FAKE_MIC_MISSING FAKE_PW_FAIL FAKE_YDOTOOL_FAIL FAKE_ENGINE_TEXT FAKE_ENGINE_SECONDS FAKE_PW_GATE FAKE_PW_CHUNKS FAKE_ENGINE_LOAD_DELAY; }
+dfresh() { fresh; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null; rm -rf "$XDG_RUNTIME_DIR" "$W/pw.log" "$W/ydo.log" "$W/clip" "$W/gate"; unset FAKE_MIC_MISSING FAKE_PW_FAIL FAKE_YDOTOOL_FAIL FAKE_ENGINE_TEXT FAKE_ENGINE_SECONDS FAKE_PW_GATE FAKE_PW_CHUNKS FAKE_ENGINE_LOAD_DELAY FAKE_ENGINE_CLEAN_TEXT FAKE_ENGINE_CLEAN_SECONDS FAKE_ENGINE_CLEAN_FAIL FAKE_TMUX_CLIENTS FAKE_TMUX_PANES FAKE_TMUX_SEND_FAIL; rm -f "$W/tmux.log" "$W/kitty.log" "$W/sig"; }
 DAILY=$A/steno-$(date +%F).txt
 BLK='[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}'
 
@@ -249,65 +249,205 @@ ydo_n() { local n; n=$(grep -c . "$W/ydo.log" 2>/dev/null); echo "${n:-0}"; }
 endn() { local n; n=$(grep -c '^end:' "$DAILY" 2>/dev/null); echo "${n:-0}"; }
 plus() { date -d "$(date +%F) $1 $2 seconds" +%T; }            # plus HH:MM:SS N -> HH:MM:SS + N seconds
 TS='\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]'
-SESS() { cut -d' ' -f1 "$XDG_RUNTIME_DIR/stenographr/state"; }
 
-echo "== toggle (type mode, live)"
-dfresh; mkdir -p "$W/gate"
-FAKE_PW_GATE=$W/gate FAKE_ENGINE_TEXT="one|two|three" steno toggle; echo $? > "$W/rc"
-waitfor '[[ $(ydo_n) -ge 1 ]]'
-check "press 1 returns at once; sentence 1 is typed before any stop signal" '[[ $(cat "$W/rc") == 0 && $(cat "$W/ydo.log") == "type --file - | one " ]]'
-check "recorder: scarlett-mic, 48 kHz, 2 ch, f32, raw, to stdout" 'grep -qxE -- "--target scarlett-mic --rate 48000 --channels 2 --format f32 --raw -" "$W/pw.log"'
-touch "$W/gate/go2"; waitfor '[[ $(ydo_n) -ge 2 ]]'; touch "$W/gate/go3"; waitfor '[[ $(ydo_n) -ge 3 ]]'
-printf 'type --file - | one \ntype --file - | two \ntype --file - | three \n' > "$W/ydo.exp"
-check "ydotool called 3 times as the sentences arrive, each sentence + one space" 'diff "$W/ydo.log" "$W/ydo.exp"'
-check "before the stop: nothing on the clipboard, no end line, but all 3 sentences are in the daily file" '[[ ! -e $W/clip && $(endn) == 0 && $(grep -cE "^$TS " "$DAILY") == 3 ]]'
-steno toggle; echo $? > "$W/rc"; waitfor '[[ $(endn) -ge 1 ]]'
-check "press 2: exit 0; clipboard has all 3 joined, no timestamps" '[[ $(cat "$W/rc") == 0 && $(cat "$W/clip") == "one two three" ]]'
+export FAKE_TMUX_LOG=$W/tmux.log FAKE_KITTY_LOG=$W/kitty.log
+LIVEARGS="live --headless --device cpu"
+lpy() { "$PY" - "$@"; }                                   # python with the stenographr package + this test's env
+LPRE='
+import os, sys, time, threading, datetime as dt, asyncio
+from stenographr.config import load
+from stenographr.log import Log
+from stenographr.live import LiveSession
+cfg = load(); log = Log(cfg.archive / "steno.log"); W = os.environ["W"]
+def wait(cond, secs=8):
+    t = time.time()
+    while time.time() - t < secs:
+        if cond(): return
+        time.sleep(0.05)
+    raise SystemExit("timeout waiting for a condition")
+def go(n): open(f"{W}/gate/go{n}", "w").close()
+def start():
+    s = LiveSession(cfg, log, "cpu"); s.phrases = []; s.on_phrase = s.phrases.append
+    assert s.preflight() is None
+    s.record_thread = threading.Thread(target=s.record); s.record_thread.start(); return s
+def daily_text(): return open(sorted(__import__("glob").glob(str(cfg.archive / "steno-*.txt")))[-1]).read()
+'
+export W
+CLEANENV="FAKE_ENGINE_TEXT=one|two|three FAKE_ENGINE_CLEAN_TEXT=Clean_{secs}_seconds. FAKE_ENGINE_CLEAN_SECONDS=100"
+runcore() { ( export FAKE_PW_GATE=$W/gate FAKE_ENGINE_TEXT="one|two|three" FAKE_ENGINE_CLEAN_TEXT="Clean {secs} seconds. Second sentence." FAKE_ENGINE_CLEAN_SECONDS=100; "$PY" -c "$LPRE
+$1" ); }
+
+echo "== live --toggle"
+dfresh
+steno live --toggle; echo $? > "$W/rc"
+check "no live session: kitty is launched once, 80x25 cells, titled, size not remembered, running 'stenographr live'" '[[ $(cat "$W/rc") == 0 && $(grep -c . "$W/kitty.log") == 1 ]] && grep -qF -- "--title|stenographr live|" "$W/kitty.log" && grep -qF -- "-o|initial_window_width=80c|-o|initial_window_height=25c|-o|remember_window_size=no|" "$W/kitty.log" && grep -qE "\|-m\|stenographr.cli\|live\|$" "$W/kitty.log"'
+dfresh; mkdir -p "$XDG_RUNTIME_DIR/stenographr"; echo 999999 > "$XDG_RUNTIME_DIR/stenographr/live.pid"
+steno live --toggle
+check "a stale pid file does not count: kitty is launched" '[[ $(grep -c . "$W/kitty.log") == 1 ]]'
+dfresh; mkdir -p "$XDG_RUNTIME_DIR/stenographr"; rm -f "$W/sig"
+bash -c 'trap "echo got >> $W/sig" USR1; while :; do sleep 0.05; done' stenographr live & FP=$!
+echo $FP > "$XDG_RUNTIME_DIR/stenographr/live.pid"; sleep 0.2
+steno live --toggle; echo $? > "$W/rc"; waitfor '[[ -s $W/sig ]]'
+check "a live session is running: it is told to stop (SIGUSR1), no window opened" '[[ $(cat "$W/rc") == 0 && $(cat "$W/sig") == got && ! -e $W/kitty.log ]]'
+kill $FP 2>/dev/null; wait $FP 2>/dev/null
+
+echo "== live session (core): live lines, clean pass, choices"
+dfresh; mkdir -p "$W/gate"; export FAKE_FF_ENC_LOG=$W/enc.log; rm -f "$FAKE_FF_ENC_LOG"
+runcore '
+s = start()
+wait(lambda: s.phrases == ["one"])
+txt = daily_text()
+assert "] one" in txt and "clean:" not in txt and "\nend:" not in txt, txt      # on screen AND in the daily file before stop
+go(2); wait(lambda: len(s.phrases) == 2); go(3); wait(lambda: len(s.phrases) == 3)
+s.request_stop(); s.record_thread.join(10); assert not s.record_thread.is_alive()
+print("CLEAN:", s.clean())
+print("STATUS:", s.deliver("copy"))
+' > "$W/core.out" 2>&1
+check "phrases are shown as recognised and already appended to the daily file (before the stop)" 'grep -q "^CLEAN:" "$W/core.out"'
+check "the clean pass ran on the whole saved audio (15 s = 3 x 5 s at 16 kHz), not on the phrases" 'grep -qx "CLEAN: Clean 15 seconds. Second sentence." "$W/core.out"'
 T0=$(sed -n 1p "$DAILY" | grep -oE "[0-9]{2}:[0-9]{2}:[0-9]{2} ·" | cut -d" " -f1)
-check "daily block: start, 3 lines timestamped recording start + offset (0, 5, 10 s), end ok" '[[ $(wc -l < "$DAILY") == 5 ]] && grep -qE "^start: $BLK · type · unknown · audio/[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6}-type\\.opus$" "$DAILY" && sed -n 2p "$DAILY" | grep -qx "\\[$T0\\] one" && sed -n 3p "$DAILY" | grep -qx "\[$(plus $T0 5)\] two" && sed -n 4p "$DAILY" | grep -qx "\[$(plus $T0 10)\] three" && sed -n 5p "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok$"'
-check "session over: state cleared, still exactly 3 ydotool calls" '[[ ! -e $XDG_RUNTIME_DIR/stenographr/state && $(ydo_n) == 3 ]]'
-check "steno.log: start, device, finish" 'grep -q " type start: " "$LOG" && grep -q " type device: " "$LOG" && grep -q " type finish: 3 sentences, ok" "$LOG"'
-
-dfresh; export FAKE_ENGINE_LOAD_DELAY=1.5 FAKE_ENGINE_TEXT="one|two|three"
-steno toggle; sleep 0.5
-check "model still loading: nothing typed yet" '[[ ! -e $W/ydo.log ]]'
-waitfor '[[ $(ydo_n) -ge 3 ]]' 200
-check "audio that arrived while the model loaded is still transcribed (3 sentences typed)" '[[ $(ydo_n) == 3 ]]'
-steno toggle; waitfor '[[ $(endn) -ge 1 ]]'; unset FAKE_ENGINE_LOAD_DELAY
-dfresh; export FAKE_ENGINE_LOAD_DELAY=1.5 FAKE_ENGINE_TEXT="one|two|three"
-steno toggle; sleep 0.3; steno toggle; waitfor '[[ $(endn) -ge 1 ]]' 200; unset FAKE_ENGINE_LOAD_DELAY
-check "stopped before the model finished loading: nothing lost, all 3 sentences typed and copied" '[[ $(ydo_n) == 3 && $(cat "$W/clip") == "one two three" ]] && grep -qE "^end: $BLK · [0-9]+s · ok$" "$DAILY"'
-
-dfresh; FAKE_MIC_MISSING=1 steno toggle; echo $? > "$W/rc"
-check "mic missing: exit 1, recorder never started, no state" '[[ $(cat "$W/rc") == 1 && ! -e $W/pw.log && ! -e $XDG_RUNTIME_DIR/stenographr/state ]]'
-check "mic missing: daily block FAILED: mic scarlett-mic not found" 'grep -qE "^start: $BLK · type · unknown$" "$DAILY" && grep -qE "^end: $BLK · [0-9]+s · FAILED: mic scarlett-mic not found, see steno.log$" "$DAILY"'
-check "mic missing: logged, no other input tried" 'grep -q "ERROR type mic scarlett-mic not found" "$LOG"'
+check "daily block: start (live · unknown · audio), 3 timestamped live lines, clean: + timestamped clean lines, end ok · copied" '[[ $(sed -n 1p "$DAILY") =~ ^start:\ $BLK\ ·\ live\ ·\ unknown\ ·\ audio/[0-9-]+-live\.opus$ ]] && sed -n 2p "$DAILY" | grep -qx "\[$T0\] one" && sed -n 4p "$DAILY" | grep -qx "\[$(plus $T0 10)\] three" && sed -n 5p "$DAILY" | grep -qx "clean:" && sed -n 6p "$DAILY" | grep -qE "^$TS Clean 15 seconds\." && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok · copied$"'
+check "Copy: wl-copy got the clean text (no timestamps)" '[[ $(cat "$W/clip") == "Clean 15 seconds. Second sentence." ]]'
+check "STATUS printed is the end line status" 'grep -qx "STATUS: ok · copied" "$W/core.out"'
+ST=$(sed -n 1p "$DAILY" | grep -oE "^start: [0-9-]+ [0-9:]+" | cut -d" " -f2-); AF=$(date -d "$ST" +%Y-%m-%d-%H%M%S)-live.opus
+check "audio: exactly one file named session start + mode (live), pointed to by the start line" '[[ $(ls "$A/audio" | wc -l) == 1 && -s $A/audio/$AF ]] && sed -n 1p "$DAILY" | grep -qE " · live · unknown · audio/$AF$"'
+check "encoder was given mono 48 kHz Opus at 96 kbps and exactly the voice channel (3 x 5 s mono f32)" 'grep -qE "^-hide_banner .*-f f32le -ar 48000 -ac 1 -i - -c:a libopus -b:a 96k .* [^ ]+/audio/$AF \| 2880000$" "$W/enc.log"'
 
 dfresh; mkdir -p "$W/gate"
-FAKE_YDOTOOL_FAIL=1 FAKE_PW_GATE=$W/gate FAKE_PW_CHUNKS=2 FAKE_ENGINE_TEXT="one|two" steno toggle
-waitfor '[[ $(ydo_n) -ge 1 ]]'; touch "$W/gate/go2"; waitfor '[[ $(ydo_n) -ge 2 ]]'; steno toggle; waitfor '[[ $(endn) -ge 1 ]]'
-check "ydotool fails: the clipboard still gets the whole session" '[[ $(cat "$W/clip") == "one two" ]]'
-check "ydotool fails: daily has both sentences and FAILED: typing failed" '[[ $(grep -cE "^$TS " "$DAILY") == 2 ]] && grep -qE "^end: $BLK · [0-9]+s · FAILED: typing failed, see steno.log$" "$DAILY" && grep -q "ERROR type typing (ydotool) failed" "$LOG"'
-
-dfresh; export FAKE_ENGINE_TEXT=" "
-steno toggle; sleep 0.8; steno toggle; waitfor '[[ $(endn) -ge 1 ]]'
-check "no speech: nothing typed, clipboard untouched, end 'ok (no speech)'" '[[ ! -e $W/ydo.log && ! -e $W/clip ]] && grep -qE "^end: $BLK · [0-9]+s · ok \(no speech\)$" "$DAILY" && [[ $(wc -l < "$DAILY") == 2 ]]'
-
-dfresh; export FAKE_PW_CHUNKS=1 FAKE_ENGINE_TEXT="hello"
-mkdir -p "$XDG_RUNTIME_DIR/stenographr"; echo "999999 1700000000" > "$XDG_RUNTIME_DIR/stenographr/state"
-steno toggle; echo $? > "$W/rc"; waitfor '[[ $(ydo_n) -ge 1 ]]'
-check "stale session file: a new session starts and types" '[[ $(cat "$W/rc") == 0 && -s $W/pw.log && $(cat "$W/ydo.log") == "type --file - | hello " && $(SESS) != 999999 ]] && grep -q "WARN  type stale session state" "$LOG"'
-steno toggle; waitfor '[[ $(endn) -ge 1 ]]'; check "...and the next press ends it normally" '[[ $(cat "$W/clip") == "hello" ]]'
-dfresh; FAKE_PW_FAIL=1 steno toggle; echo $? > "$W/rc"; waitfor '[[ $(endn) -ge 1 ]]'
-check "recorder dies at start: FAILED block, state cleared" '[[ $(cat "$W/rc") == 0 ]] && grep -q "FAILED: recorder exited, see steno.log" "$DAILY" && waitfor "[[ ! -e \$XDG_RUNTIME_DIR/stenographr/state ]]"'
-
+runcore 's = start(); wait(lambda: s.phrases == ["one"]); go(2); go(3); wait(lambda: len(s.phrases) == 3); s.request_stop(); s.record_thread.join(10); s.clean(); print("STATUS:", s.deliver("none"))' > "$W/core.out" 2>&1
+check "Don't copy: nothing is copied, end line says not copied" '[[ ! -e $W/clip ]] && grep -qx "STATUS: ok · not copied" "$W/core.out" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok · not copied$"'
 dfresh; mkdir -p "$W/gate"
-FAKE_PW_GATE=$W/gate FAKE_ENGINE_TEXT="one|two|three" steno toggle; waitfor '[[ $(ydo_n) -ge 1 ]]'; touch "$W/gate/go2"; waitfor '[[ $(ydo_n) -ge 2 ]]'
-kill -9 "$(SESS)"; sleep 0.2; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null
-check "session killed mid-way: daily has the 2 sentences so far and no end line" '[[ $(grep -cE "^$TS " "$DAILY") == 2 && $(endn) == 0 ]] && grep -qE "^start: $BLK · type" "$DAILY"'
-check "killed session: the start line still carries the audio pointer, and that file exists" 'sed -n 1p "$DAILY" | grep -qE " · type · unknown · audio/[0-9-]+-type\.opus$" && [[ -f $A/$(sed -n 1p "$DAILY" | grep -oE "audio/[^ ]+$") ]]'
+FAKE_MIC_MISSING=1 runcore 's = LiveSession(cfg, log, "cpu"); print("PRE:", s.preflight())' > "$W/core.out" 2>&1
+check "mic missing: nothing recorded, daily block FAILED: mic scarlett-mic not found, no audio" 'grep -qx "PRE: mic scarlett-mic not found" "$W/core.out" && [[ ! -e $W/pw.log && ! -e $A/audio ]] && grep -qE "^start: $BLK · live · unknown$" "$DAILY" && grep -qE "^end: $BLK · [0-9]+s · FAILED: mic scarlett-mic not found, see steno.log$" "$DAILY"'
+dfresh; mkdir -p "$W/gate"; export FAKE_FF_ENC_FAIL=1
+runcore 's = start(); wait(lambda: s.phrases == ["one"]); go(2); go(3); wait(lambda: len(s.phrases) == 3); s.request_stop(); s.record_thread.join(10); s.clean(); print("STATUS:", s.deliver("copy"))' > "$W/core.out" 2>&1
+check "encoder fails: the session still runs and delivers (clipboard set)" '[[ -s $W/clip ]] && grep -q "^STATUS:" "$W/core.out"'
+check "encoder fails: start line says audio: none, end line says audio FAILED" 'sed -n 1p "$DAILY" | grep -qE "^start: $BLK · live · unknown · audio: none$" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok \(audio FAILED, see steno.log\) · copied$"'
+check "encoder fails: logged with the reason; no audio file" 'grep -q "ERROR live audio not saved .*ffmpeg exited at start .*Permission denied" "$LOG" && [[ ! -e $A/audio || -z $(ls -A "$A/audio") ]]'
+unset FAKE_FF_ENC_FAIL FAKE_FF_ENC_LOG
+
+echo "== live: Send to Claude (tmux)"
+export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+runcore '
+from stenographr import tmuxsend
+default, panes = tmuxsend.choose_target()
+print("TARGET:", default, sorted(panes))
+s = start(); wait(lambda: s.phrases == ["one"]); go(2); go(3); wait(lambda: len(s.phrases) == 3); s.request_stop(); s.record_thread.join(10); s.clean()
+print("STATUS:", s.deliver("claude", default))
+' > "$W/core.out" 2>&1
+check "one attached client whose session has a claude pane: that session is the target" 'grep -qx "TARGET: alpha \[.alpha., .beta.\]" "$W/core.out"'
+check "exactly one send-keys -l call, to the claude pane of alpha (%0), with the clean text on ONE line" '[[ $(grep -c "^send-keys|" "$W/tmux.log") == 1 ]] && grep -qxF "send-keys|-t|%0|-l|--|Clean 15 seconds. Second sentence.|" "$W/tmux.log"'
+check "Enter is never sent (no Enter/C-m in any tmux call)" '! grep -qiE "enter|C-m|\|\\\\r" "$W/tmux.log"'
+check "end line: sent to claude alpha; nothing on the clipboard" '[[ ! -e $W/clip ]] && grep -qx "STATUS: ok · sent to claude alpha" "$W/core.out" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok · sent to claude alpha$"'
+dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_SEND_FAIL=1 FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude'
+runcore 's = start(); wait(lambda: s.phrases == ["one"]); s.request_stop(); s.record_thread.join(10); s.clean(); print("STATUS:", s.deliver("claude", "alpha"))' > "$W/core.out" 2>&1
+check "tmux send fails: end line FAILED: send to claude failed, logged" 'grep -qx "STATUS: FAILED: send to claude failed, see steno.log" "$W/core.out" && grep -q "ERROR live send to claude alpha failed" "$LOG"'
+unset FAKE_TMUX_SEND_FAIL
+dfresh; export FAKE_TMUX_CLIENTS="alpha\nbeta" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+runcore 'from stenographr import tmuxsend; d, p = tmuxsend.choose_target(); print("TARGET:", d, sorted(p))' > "$W/core.out" 2>&1
+check "several clients: ambiguous, no default; the list holds the sessions that have a claude pane" 'grep -qx "TARGET: None \[.alpha., .beta.\]" "$W/core.out"'
+export FAKE_TMUX_CLIENTS="gamma" FAKE_TMUX_PANES='gamma\t%5\tbash\nbeta\t%2\tclaude'
+runcore 'from stenographr import tmuxsend; d, p = tmuxsend.choose_target(); print("TARGET:", d, sorted(p))' > "$W/core.out" 2>&1
+check "the attached session has no claude pane but another does: ambiguous, list of those that do" 'grep -qx "TARGET: None \[.beta.\]" "$W/core.out"'
+export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tbash'
+runcore 'from stenographr import tmuxsend; d, p = tmuxsend.choose_target(); print("TARGET:", d, sorted(p))' > "$W/core.out" 2>&1
+check "no claude pane anywhere: no target" 'grep -qx "TARGET: None \[\]" "$W/core.out"'
+
+echo "== live screen (Textual, headless pilot)"
+UPRE='
+from stenographr.live_ui import LiveApp, PickSession
+async def until(pilot, cond, secs=8):
+    t = time.time()
+    while time.time() - t < secs:
+        if cond(): return
+        await pilot.pause(0.05)
+    raise SystemExit("timeout")
+def labels(app): return {b.id: (str(b.label), b.disabled, b.display) for b in app.screen.query("Button")}
+def logtext(app): return [("".join(s.text for s in l)).strip() for l in app.query_one("RichLog").lines]
+'
+runui() { ( export FAKE_PW_GATE=$W/gate FAKE_ENGINE_TEXT="one|two|three" FAKE_ENGINE_CLEAN_TEXT="Clean {secs} seconds." FAKE_ENGINE_CLEAN_SECONDS=100; "$PY" -c "$LPRE$UPRE
+$1" ); }
+dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+runui '
+async def main():
+    s = LiveSession(cfg, log, "cpu"); app = LiveApp(s)
+    async with app.run_test(size=(80, 25)) as pilot:
+        await until(pilot, lambda: logtext(app) == ["one"])
+        print("BANNER:", app.screen.query_one("#banner").content if hasattr(app.screen.query_one("#banner"), "content") else "?")
+        print("RECORDING:", logtext(app), {k: v[2] for k, v in labels(app).items()})
+        go(2); go(3); await until(pilot, lambda: len(logtext(app)) == 3)
+        await pilot.click("#stop")
+        await until(pilot, lambda: app.phase == "review")
+        print("REVIEW:", logtext(app), labels(app))
+        await pilot.click("#claude")
+        await pilot.pause(0.3)
+    print("EXITED")
+asyncio.run(main())
+' > "$W/ui.out" 2>&1
+check "screen: banner text, each phrase shown as recognised, only Stop visible while recording" 'grep -q "^BANNER: Live preview · final text is cleaned up when you stop" "$W/ui.out" && grep -q "^RECORDING: \[.one.\] {.stop.: True, .copy.: False, .claude.: False, .nocopy.: False}" "$W/ui.out"'
+check "after Stop: the clean text and the three buttons (Copy, Send to Claude · alpha, Don't copy)" 'grep -q "^REVIEW: \[.Clean 15 seconds..\]" "$W/ui.out" && grep -qF "Send to Claude · alpha (c)" "$W/ui.out" && grep -qF "Don'"'"'t copy (n)" "$W/ui.out"'
+check "clicking Send to Claude: one send-keys -l to %0, the window then exits, end line sent to claude alpha" 'grep -q "^EXITED" "$W/ui.out" && [[ $(grep -c "^send-keys|" "$W/tmux.log") == 1 ]] && grep -qxF "send-keys|-t|%0|-l|--|Clean 15 seconds.|" "$W/tmux.log" && tail -1 "$DAILY" | grep -qE "· ok · sent to claude alpha$"'
+dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tbash'
+runui '
+async def main():
+    s = LiveSession(cfg, log, "cpu"); app = LiveApp(s)
+    async with app.run_test(size=(80, 25)) as pilot:
+        await until(pilot, lambda: logtext(app) == ["one"]); go(2); go(3); await until(pilot, lambda: len(logtext(app)) == 3)
+        await pilot.press("s"); await until(pilot, lambda: app.phase == "review")
+        print("CLAUDE:", labels(app)["claude"])
+        await pilot.press("c"); await pilot.pause(0.2); print("PHASE-AFTER-C:", app.phase)
+        await pilot.press("y"); await pilot.pause(0.3)
+    print("EXITED")
+asyncio.run(main())
+' > "$W/ui.out" 2>&1
+check "no claude pane: the Send to Claude button is disabled (and its key does nothing)" 'grep -q "^CLAUDE: (.Send to Claude (no claude pane)., True, True)" "$W/ui.out" && grep -q "^PHASE-AFTER-C: review" "$W/ui.out" && ! grep -q "^send-keys" "$W/tmux.log" 2>/dev/null'
+check "the keys work too: s stops, y copies the clean text" 'grep -q "^EXITED" "$W/ui.out" && [[ $(cat "$W/clip") == "Clean 15 seconds." ]] && tail -1 "$DAILY" | grep -qE "· ok · copied$"'
+dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha\nbeta" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+runui '
+async def main():
+    s = LiveSession(cfg, log, "cpu"); app = LiveApp(s)
+    async with app.run_test(size=(80, 25)) as pilot:
+        await until(pilot, lambda: logtext(app) == ["one"]); go(2); go(3); await until(pilot, lambda: len(logtext(app)) == 3)
+        await pilot.click("#stop"); await until(pilot, lambda: app.phase == "review")
+        print("CLAUDE:", labels(app)["claude"][0])
+        await pilot.click("#claude"); await pilot.pause(0.3)
+        print("PICKER:", type(app.screen).__name__, [str(o.prompt) for o in app.screen.query_one("OptionList").options])
+        await pilot.press("down"); await pilot.press("enter"); await pilot.pause(0.4)
+    print("EXITED")
+asyncio.run(main())
+' > "$W/ui.out" 2>&1
+check "ambiguous (two clients): the button opens a list of sessions with a claude pane; picking one sends there" 'grep -q "^CLAUDE: Send to Claude… (c)" "$W/ui.out" && grep -q "^PICKER: PickSession \[.alpha., .beta.\]" "$W/ui.out" && grep -q "^EXITED" "$W/ui.out" && grep -qxF "send-keys|-t|%2|-l|--|Clean 15 seconds.|" "$W/tmux.log" && tail -1 "$DAILY" | grep -qE "· ok · sent to claude beta$"'
+
+echo "== live: the window goes away"
+dfresh; mkdir -p "$W/gate"; export FAKE_ENGINE_TEXT="one|two|three" FAKE_ENGINE_CLEAN_TEXT="Clean {secs} seconds." FAKE_ENGINE_CLEAN_SECONDS=100 FAKE_PW_GATE=$W/gate
+"$PY" -m stenographr.cli $LIVEARGS >/dev/null 2>&1 & LP=$!
+waitfor 'grep -q "\] one" "$DAILY" 2>/dev/null'; touch "$W/gate/go2" "$W/gate/go3"; waitfor '[[ $(grep -cE "^$TS " "$DAILY") == 3 ]]'
+steno live --toggle; waitfor '[[ $(grep -c "^clean:" "$DAILY") == 1 ]]'
+check "live --toggle (Ctrl+backtick) while the screen runs: recording stops and the clean pass runs (clean block written, no end line yet)" '[[ $(endn) == 0 ]] && grep -qE "^$TS Clean 15 seconds\.$" "$DAILY" && ! grep -q kitty "$W/kitty.log" 2>/dev/null'
+kill -HUP $LP; wait $LP; echo $? > "$W/rc"
+check "window closed at the choice step: end line ok · not copied (window closed); nothing copied or sent" '[[ ! -e $W/clip ]] && ! grep -q "^send-keys" "$W/tmux.log" 2>/dev/null && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok · not copied \(window closed\)$"'
+check "the running-session marker is gone afterwards" '[[ ! -e $XDG_RUNTIME_DIR/stenographr/live.pid ]]'
+dfresh; mkdir -p "$W/gate"; export FAKE_ENGINE_TEXT="one|two|three" FAKE_ENGINE_CLEAN_TEXT="Clean {secs} seconds." FAKE_ENGINE_CLEAN_SECONDS=100 FAKE_PW_GATE=$W/gate
+"$PY" -m stenographr.cli $LIVEARGS >/dev/null 2>&1 & LP=$!
+waitfor 'grep -q "\] one" "$DAILY" 2>/dev/null'; touch "$W/gate/go2"; waitfor '[[ $(grep -cE "^$TS " "$DAILY") == 2 ]]'
+kill -HUP $LP; wait $LP
+check "window closed WHILE recording: stopped, clean block written for what was said, end line says no delivery" 'grep -q "^clean:" "$DAILY" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok · not copied \(window closed\)$" && [[ ! -e $W/clip ]]'
+dfresh; mkdir -p "$W/gate"; export FAKE_ENGINE_TEXT="one|two|three" FAKE_ENGINE_CLEAN_FAIL=1 FAKE_PW_GATE=$W/gate
+"$PY" -m stenographr.cli $LIVEARGS >/dev/null 2>&1 & LP=$!
+waitfor 'grep -q "\] one" "$DAILY" 2>/dev/null'; kill -HUP $LP; wait $LP
+check "window closed and the clean pass can't run: live lines kept, the end line says why" 'grep -q "\] one" "$DAILY" && ! grep -q "^clean:" "$DAILY" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · FAILED: clean pass failed, see steno.log$" && grep -q "ERROR live clean pass failed" "$LOG"'
+unset FAKE_ENGINE_CLEAN_FAIL
+dfresh; mkdir -p "$W/gate"; export FAKE_ENGINE_TEXT="one|two|three" FAKE_PW_GATE=$W/gate
+"$PY" -m stenographr.cli $LIVEARGS >/dev/null 2>&1 & LP=$!
+waitfor 'grep -q "\] one" "$DAILY" 2>/dev/null'; touch "$W/gate/go2"; waitfor '[[ $(grep -cE "^$TS " "$DAILY") == 2 ]]'
+kill -9 $LP; wait $LP 2>/dev/null; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null; sleep 0.3
+check "killed (SIGKILL) mid-session: the start line has the audio pointer, the live lines so far are there, no end line" 'sed -n 1p "$DAILY" | grep -qE " · live · unknown · audio/[0-9-]+-live\.opus$" && [[ $(grep -cE "^$TS " "$DAILY") == 2 && $(endn) == 0 ]] && [[ -f $A/$(sed -n 1p "$DAILY" | grep -oE "audio/[^ ]+$") ]]'
 steno recall </dev/null > "$W/rc.out" 2>&1
-check "recall still lists the crashed session" 'grep -q "^1 piece\|: 1 piece$" "$W/rc.out" && grep -qE "^1\. \[[0-9]{2}:[0-9]{2}\] type · one two$" "$W/rc.out"'
+check "recall lists the killed session (from its live lines)" 'grep -qE "^1\. \[[0-9]{2}:[0-9]{2}\] live · one two$" "$W/rc.out"'
+dfresh; unset FAKE_ENGINE_TEXT FAKE_ENGINE_CLEAN_TEXT FAKE_ENGINE_CLEAN_SECONDS
+check "ydotool is never called (log absent) and the code no longer mentions it" '[[ ! -e $W/ydo.log ]] && ! grep -rqi ydotool "$PROJECT/src"'
+check "type mode is gone: no toggle/_type-session subcommands" '! steno toggle >/dev/null 2>&1 && ! steno _type-session >/dev/null 2>&1'
 
 echo "== notes mode"
 # run `notes` in the background in directory $1; helpers wait for output / interrupt it
@@ -358,15 +498,8 @@ dfresh; RD3=$W/repo3; rm -rf "$RD3"; mkdir -p "$RD3"; git init -q "$RD3"; printf
 nstart "$RD3" FAKE_PW_CHUNKS=1; nwait 1; nstop
 check "the old steno-*.txt line no longer counts: steno/ is added" '[[ $(cat "$RD3/.gitignore") == "$(printf "steno-*.txt\nsteno/")" ]]'
 
-echo "== session audio"
+echo "== session audio (notes; live is covered above)"
 dfresh; mkdir -p "$W/gate"; export FAKE_FF_ENC_LOG=$W/enc.log; rm -f "$FAKE_FF_ENC_LOG"
-FAKE_PW_GATE=$W/gate FAKE_ENGINE_TEXT="one|two|three" steno toggle; waitfor '[[ $(ydo_n) -ge 1 ]]'; touch "$W/gate/go2"; waitfor '[[ $(ydo_n) -ge 2 ]]'; touch "$W/gate/go3"; waitfor '[[ $(ydo_n) -ge 3 ]]'
-steno toggle; waitfor '[[ $(endn) -ge 1 ]]'; sleep 0.3
-ST=$(sed -n 1p "$DAILY" | grep -oE "^start: [0-9-]+ [0-9:]+" | cut -d" " -f2-); AF=$(date -d "$ST" +%Y-%m-%d-%H%M%S)-type.opus
-check "type session: exactly one audio file, named session start + mode, in <archive>/audio/" '[[ $(ls "$A/audio" | wc -l) == 1 && -s $A/audio/$AF ]]'
-check "type session: the start line points to it (relative to the archive)" 'sed -n 1p "$DAILY" | grep -qE " · type · unknown · audio/$AF$" && [[ -f $A/$(sed -n 1p "$DAILY" | grep -oE "audio/[^ ]+$") ]]'
-check "encoder was given mono 48 kHz Opus at 96 kbps and exactly the voice channel (3 x 5 s mono f32)" 'grep -qE "^-hide_banner .*-f f32le -ar 48000 -ac 1 -i - -c:a libopus -b:a 96k .* [^ ]+/audio/$AF \| 2880000$" "$W/enc.log"'
-check "audio is not in the way: text still typed 3 times, clipboard set, end ok" '[[ $(ydo_n) == 3 && $(cat "$W/clip") == "one two three" ]] && tail -1 "$DAILY" | grep -qE "· ok$"'
 mkdir -p "$W/an"; rm -rf "$A" "$W/gate"; mkdir -p "$W/gate"; rm -f "$FAKE_FF_ENC_LOG"
 nstart "$W/an" FAKE_ENGINE_TEXT="one|two|three"; nwait 3; nstop
 ST=$(sed -n 1p "$DAILY" | grep -oE "^start: [0-9-]+ [0-9:]+" | cut -d" " -f2-); AN=$(date -d "$ST" +%Y-%m-%d-%H%M%S)-notes.opus
@@ -394,12 +527,8 @@ assert abs(run(1000, 4800)[200:].std() - 0.707) < 0.02
 assert run(12000, 4800)[200:].std() < 0.02
 assert len(run(1000, 4800)) == 16000 and np.allclose(run(3000, 4800), run(3000, 777), atol=1e-5)
 EOF'
-dfresh; rm -rf "$A" "$W/gate"; export FAKE_FF_ENC_FAIL=1
-mkdir -p "$W/gate"; FAKE_PW_GATE=$W/gate FAKE_PW_CHUNKS=2 FAKE_ENGINE_TEXT="one|two" steno toggle; waitfor '[[ $(ydo_n) -ge 1 ]]'; touch "$W/gate/go2"; waitfor '[[ $(ydo_n) -ge 2 ]]'; steno toggle; waitfor '[[ $(endn) -ge 1 ]]'
-check "encoder fails: the text is still typed and copied" '[[ $(ydo_n) == 2 && $(cat "$W/clip") == "one two" ]]'
-check "encoder fails: start line says audio: none, end line says audio FAILED, no audio file" 'sed -n 1p "$DAILY" | grep -qE "^start: $BLK · type · unknown · audio: none$" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok \(audio FAILED, see steno.log\)$" && [[ ! -e $A/audio || -z $(ls -A "$A/audio") ]]'
-check "encoder fails: logged with the reason" 'grep -q "ERROR type audio not saved .*ffmpeg exited at start .*Permission denied" "$LOG"'
-dfresh; rm -rf "$A"; nstart "$W/an2" FAKE_PW_CHUNKS=1 FAKE_ENGINE_TEXT="solo"; nwait 1; nstop
+dfresh; export FAKE_FF_ENC_FAIL=1
+nstart "$W/an2" FAKE_PW_CHUNKS=1 FAKE_ENGINE_TEXT="solo"; nwait 1; nstop
 check "notes with a failing encoder: sentences still printed and filed, exit 0, audio FAILED" '[[ $(cat "$W/notes.out") == solo && $(cat "$W/rc") == 0 ]] && grep -qE "· audio: none$" "$DAILY" && tail -1 "$DAILY" | grep -qE "· ok \(audio FAILED, see steno.log\)$" && grep -q "solo" "$W/an2/steno-$(date +%F).txt"'
 unset FAKE_FF_ENC_FAIL FAKE_FF_ENC_LOG
 
@@ -452,6 +581,25 @@ assert p[1].where == "/x/steno/steno-2026-11-09.txt" and p[0].where == "unknown"
 assert p[2].status is None and p[3].status.startswith("ok (audio FAILED")
 EOF'
 printf '3\n' | steno recall >/dev/null 2>&1; check "...and copies the text only (no path, no audio pointer)" '[[ $(cat "$W/clip") == "new format notes" ]]'
+printf 'start: %s 07:00:00 · live · unknown · audio/x-live.opus\n[07:00:01] live bit one\n[07:00:05] live bit two\nclean:\n[07:00:01] The clean sentence, whole.\n[07:00:20] A second clean paragraph.\nend: %s 07:00:30 · 30s · ok · copied\nstart: %s 07:10:00 · live · unknown · audio/y-live.opus\n[07:10:01] only live phrases here\n[07:10:04] and here\n' $TD $TD $TD > "$A/steno-$TD.txt"
+steno recall </dev/null > "$W/rc.out" 2>&1
+check "recall: a live session with a clean block shows (and copies) the clean text, one without falls back to its live lines" 'grep -qx "2. \[07:00\] live · The clean sentence, whole. A second clean paragraph." "$W/rc.out" && grep -qx "1. \[07:10\] live · only live phrases here and here" "$W/rc.out" && ! grep -q "live bit" "$W/rc.out"'
+printf '2\n' | steno recall >/dev/null 2>&1; check "...the clipboard gets the clean text, no timestamps, no 'clean:'" '[[ $(cat "$W/clip") == "The clean sentence, whole. A second clean paragraph." ]]'
+check "parser: live and clean text are separate fields; a crashed live block has no status" '"$PY" - <<EOF
+from stenographr.daily import parse_sessions
+p = parse_sessions(open("$A/steno-$TD.txt").read())
+assert p[0].live == "live bit one live bit two" and p[0].clean == "The clean sentence, whole. A second clean paragraph." and p[0].text == p[0].clean
+assert p[0].status == "ok · copied" and p[1].clean == "" and p[1].text == p[1].live and p[1].status is None
+EOF'
+check "clean-pass chunking: merged up to ~30 s, split only at the longest pauses, nothing lost" '"$PY" - <<EOF
+from stenographr.engines.parakeet import merge_spans
+spans = [(0, 5), (5.5, 10), (12, 20), (20.4, 28), (31, 40), (40.2, 55), (60, 65)]
+ch = merge_spans(spans, 30)
+assert ch[0][0] == 0 and ch[-1][1] == 65, ch
+assert all(b - a <= 30.5 for a, b in ch), ch                       # no chunk past the cap
+assert ch[:2] == [(0, 28), (31, 65)] or ch[0] == (0, 28), ch        # the first cut is at the longest gap (28 -> 31)
+assert merge_spans([(0, 3)], 30) == [(0, 3)] and merge_spans([], 30) == []
+EOF'
 rm -rf "$A"; mkdir -p "$A"; steno recall </dev/null >/dev/null 2>&1; echo $? > "$W/rc"; check "nothing to recall: exit 1" '[[ $(cat "$W/rc") == 1 ]]'
 
 echo "== GNOME keybinding"
@@ -463,7 +611,7 @@ BEFORE0=$(cat "$GS/$MK.custom-keybinding:$C0"/* | md5sum)
 steno keybinding install >/dev/null; C1=${C0%custom0/}custom1/
 check "list gets the new entry appended, the old one kept first" '[[ $(cat "$GS/$MK/custom-keybindings") == "['"'$C0'"', '"'$C1'"']" ]]'
 check "existing entry unchanged" '[[ $(cat "$GS/$MK.custom-keybinding:$C0"/* | md5sum) == "$BEFORE0" ]]'
-check "new entry: name, <Control>grave, absolute path + toggle" '[[ $(cat "$GS/$MK.custom-keybinding:$C1/name") == "'"'stenographr dictation'"'" && $(cat "$GS/$MK.custom-keybinding:$C1/binding") == "'"'<Control>grave'"'" ]] && grep -qE "^.(/[^ ]+)/stenographr toggle.$" "$GS/$MK.custom-keybinding:$C1/command"'
+check "new entry: name, <Control>grave, absolute path + live --toggle" '[[ $(cat "$GS/$MK.custom-keybinding:$C1/name") == "'"'stenographr dictation'"'" && $(cat "$GS/$MK.custom-keybinding:$C1/binding") == "'"'<Control>grave'"'" ]] && grep -qE "^.(/[^ ]+)/stenographr live --toggle.$" "$GS/$MK.custom-keybinding:$C1/command"'
 steno keybinding install >/dev/null
 check "install twice: still one entry of ours" '[[ $(cat "$GS/$MK/custom-keybindings") == "['"'$C0'"', '"'$C1'"']" ]]'
 steno keybinding remove >/dev/null

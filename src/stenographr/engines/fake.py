@@ -36,6 +36,23 @@ class FakeEngine:
     def stream(self):
         return FakeStream()
 
+    def transcribe_long(self, audio: np.ndarray) -> list[dict]:
+        """The 'clean pass': one segment per FAKE_ENGINE_CLEAN_SECONDS (15) of audio, texts from FAKE_ENGINE_CLEAN_TEXT.
+        FAKE_ENGINE_CLEAN_FAIL=1: raise (to test the failure path)."""
+        if os.environ.get("FAKE_ENGINE_CLEAN_FAIL") == "1":
+            raise RuntimeError("fake clean-pass failure")
+        time.sleep(float(os.environ.get("FAKE_ENGINE_CLEAN_DELAY", "0")))        # a slow clean pass
+        step = float(os.environ.get("FAKE_ENGINE_CLEAN_SECONDS", "15"))
+        words = os.environ.get("FAKE_ENGINE_CLEAN_TEXT", "Clean sentence one.|Clean sentence two.").split("|")
+        total = len(audio) / SR
+        out, t, i = [], 0.0, 0
+        while t < total:
+            out.append({"start": t, "end": min(t + step, total), "text": words[i % len(words)]})
+            t, i = t + step, i + 1
+        for o in out:                                    # "{secs}" = how much audio the pass was given (proves what it ran on)
+            o["text"] = o["text"].replace("{secs}", str(round(total)))
+        return out
+
 
 class FakeStream:
     """One segment per FAKE_ENGINE_SECONDS of audio fed; flush() emits a remainder longer than 0.5 s."""

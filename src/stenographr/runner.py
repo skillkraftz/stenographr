@@ -1,4 +1,4 @@
-"""Engine reuse and the CPU/GPU decision, shared by `clip`, `toggle` and `notes`."""
+"""Engine reuse and the CPU/GPU decision, shared by `clip`, `notes` and `live`."""
 from __future__ import annotations
 
 import time
@@ -37,7 +37,7 @@ def pick_device(cfg, log: Log, name: str, requested: str) -> str:
     return decision.device
 
 
-def transcribe_audio(cfg, log: Log, engines: Engines, name: str, audio, requested: str):
+def transcribe_audio(cfg, log: Log, engines: Engines, name: str, audio, requested: str, method: str = "transcribe"):
     """Whole-recording transcription. A failed GPU run is redone on the CPU. Returns (segments, device)."""
     device = pick_device(cfg, log, name, requested)
     segments = None
@@ -45,7 +45,7 @@ def transcribe_audio(cfg, log: Log, engines: Engines, name: str, audio, requeste
         try:
             engine = engines.get(device, name)
             t1 = time.monotonic()
-            segments = engine.transcribe(audio)
+            segments = getattr(engine, method)(audio)
         except Exception as e:                       # noqa: BLE001 - any engine failure
             if device == "gpu":
                 log.error(name, f"GPU run failed, redoing on CPU: {type(e).__name__}: {e}")

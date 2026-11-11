@@ -65,7 +65,7 @@ Samsung file name (`YYYYMMDD_HHMMSS`, any suffix), else `--recorded-at`, else th
 
 ## Dictation
 
-Needs `pw-record`, `ydotool` (user service running), `wl-copy`; records from the PipeWire node `scarlett-mic`
+Needs `pw-record`, `ffmpeg` (libopus), `wl-copy`, `kitty` (for the shortcut), `tmux` (only for Send to Claude); records from the PipeWire node `scarlett-mic`
 (see the audio section below), channel 1. Suggested aliases:
 
 ```sh
@@ -73,9 +73,13 @@ alias steno='stenographr notes'
 alias recall='stenographr recall'
 ```
 
-- `stenographr toggle` (Ctrl+`): the first press starts a background session that records at once and types each
-  sentence at the cursor as you pause (sentence + a space). The second press finishes the last sentence, puts the
-  whole session on the clipboard and ends the session. Everything is appended to the daily file as it is said.
+- `stenographr live`: a Textual screen (80x25, in the current terminal) that never types into other windows. It shows each
+  phrase as you speak (and appends it to the daily file), and when you stop it re-transcribes the whole session in one
+  pass to get whole sentences. Then: **Copy (y)** puts the clean text on the clipboard, **Send to Claude · session (c)**
+  types it as one line into that tmux session's Claude Code input (never presses Enter), **Don't copy (n)** does nothing.
+  `stenographr live --toggle` is what Ctrl+` runs: if a live session is running it stops it, otherwise it opens a kitty
+  window with one. Closing the window any other way stops it without delivering; the live lines and the audio are
+  already saved.
 - `stenographr notes` (`steno`): live in the terminal until Ctrl+C. Each sentence is printed, and appended at once
   to the notes file and to the daily file. Inside a git repo the notes file is `<repo root>/steno/steno-YYYY-MM-DD.txt`
   (and `steno/` is added to the repo's `.gitignore` if git isn't ignoring it yet); elsewhere it is
@@ -85,21 +89,22 @@ alias recall='stenographr recall'
   number copies it, `a` lists all, Enter or `q` exits. `recall 2` copies piece 2 directly. A clip piece copies that
   transcript's text.
 
-Every type and notes session also keeps its audio: `<archive>/audio/YYYY-MM-DD-HHMMSS-<mode>.opus` (mono, 48 kHz, Opus
+Every live and notes session also keeps its audio: `<archive>/audio/YYYY-MM-DD-HHMMSS-<mode>.opus` (mono, 48 kHz, Opus
 96 kbps, about 0.7 MB per minute, encoded while recording so a crash still leaves it). The session's start line in the
 daily file points to it; its time zero is the text's time zero. If the audio can't be saved the session still runs and
 the start line says `audio: none`. Needs ffmpeg with libopus.
 
 Only the kept records carry times: each sentence line in the daily and notes files starts with `[HH:MM:SS]` (when it
-was said). The terminal output, typed text, clipboard and recall output never have them.
+was said). The terminal output, live screen, clipboard, text sent to Claude and recall output never have them.
 
 Block format (details in [SPEC.md](SPEC.md)):
 
 ```
-start: 2026-11-09 10:00:00 · type · unknown · audio/2026-11-09-100000-type.opus
-[10:00:03] <sentence>
-[10:00:09] <sentence>
-end: 2026-11-09 10:00:42 · 42s · ok
+start: 2026-11-10 20:06:00 · live · unknown · audio/2026-11-10-200600-live.opus
+[20:06:01] <live phrase>
+clean:
+[20:06:01] <clean sentence or paragraph>
+end: 2026-11-10 20:07:30 · 1m30s · ok · copied
 ```
 
 The microphone and channel are in `[dictation]` of the config (`mic = "scarlett-mic"`, `channel = 1`).
@@ -107,12 +112,12 @@ The microphone and channel are in `[dictation]` of the config (`mic = "scarlett-
 ### Ctrl+` shortcut
 
 ```sh
-stenographr keybinding install     # adds "stenographr dictation" = <Control>grave -> <path>/stenographr toggle
+stenographr keybinding install     # adds "stenographr dictation" = <Control>grave -> <path>/stenographr live --toggle
 stenographr keybinding remove      # removes only that entry
 ```
 
 By hand: Settings > Keyboard > View and Customize Shortcuts > Custom Shortcuts > +, name "stenographr dictation",
-command = the output of `command -v stenographr` followed by ` toggle`, shortcut Ctrl+`. To undo, delete that entry
+command = the output of `command -v stenographr` followed by ` live --toggle`, shortcut Ctrl+`. To undo, delete that entry
 there. Note it is a global shortcut, so it takes Ctrl+` away from apps that use it (e.g. editors' terminal toggle).
 
 ## Device selection
