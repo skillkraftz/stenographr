@@ -7,6 +7,7 @@ A Claude pane is one whose `pane_current_command` is `claude` (the same rule hyp
 """
 from __future__ import annotations
 
+import os
 import subprocess
 
 
@@ -29,28 +30,53 @@ def claude_panes() -> dict[str, str]:
     return out
 
 
-def attached_sessions() -> list[str]:
-    """The sessions the attached tmux clients are looking at (each once)."""
+def _all_panes() -> dict[str, str]:
+    """{pane id: session name} for every tmux pane."""
     try:
-        r = _tmux("list-clients", "-F", "#{client_session}")
+        r = _tmux("list-panes", "-a", "-F", "#{session_name}\t#{pane_id}\t#{pane_current_command}")
     except (OSError, subprocess.SubprocessError):
-        return []
-    seen: list[str] = []
-    for s in (r.stdout.splitlines() if r.returncode == 0 else []):
-        if s and s not in seen:
-            seen.append(s)
-    return seen
+        return {}
+    out: dict[str, str] = {}
+    for line in (r.stdout.splitlines() if r.returncode == 0 else []):
+        p = line.split("\t")
+        if len(p) == 3:
+            out[p[1]] = p[0]
+    return out
 
 
-def choose_target() -> tuple[str | None, dict[str, str]]:
-    """(the unambiguous target session or None, all sessions with a Claude pane).
-    Unambiguous = exactly one attached client and its session has a Claude pane. Otherwise the caller offers the
-    list; with no Claude pane anywhere the list is empty and sending is not possible."""
+def hyperbeam_pane() -> str | None:
+    """The pane id hyperbeam named as this project's Claude pane (HB_CLAUDE_PANE), or None when not in hyperbeam.
+    1. our own environment; 2. else, inside tmux, the HB_CLAUDE_PANE of the session our pane is in."""
+    pane = os.environ.get("HB_CLAUDE_PANE", "").strip()
+    if pane:
+        return pane
+    mine = os.environ.get("TMUX_PANE")
+    if not mine:
+        return None
+    try:
+        r = _tmux("display-message", "-p", "-t", mine, "#{session_name}")
+        sess = r.stdout.strip() if r.returncode == 0 else ""
+        if not sess:
+            return None
+        r = _tmux("show-environment", "-t", sess, "HB_CLAUDE_PANE")
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = r.stdout.strip() if r.returncode == 0 else ""
+    return out.split("=", 1)[1].strip() or None if out.startswith("HB_CLAUDE_PANE=") else None
+
+
+def choose_target() -> tuple[str | None, str | None, dict[str, str], str | None]:
+    """(target session, target pane id, {session: Claude pane} for the picker, notice).
+    A hyperbeam pane that exists is the target, no question (its session name is the target session). If the id is
+    set but the pane is gone, the notice says so and the caller offers the picker. Not in hyperbeam: the picker."""
     panes = claude_panes()
-    clients = attached_sessions()
-    if len(clients) == 1 and clients[0] in panes:
-        return clients[0], panes
-    return None, panes
+    hb = hyperbeam_pane()
+    if hb:
+        sess = _all_panes().get(hb)
+        if sess:
+            return sess, hb, panes, None
+        return None, None, panes, "hyperbeam's Claude pane not found"
+    return None, None, panes, None
 
 
 def send(pane: str, text: str, enter: bool = False) -> None:

@@ -240,7 +240,7 @@ check "missing file: error, next file still done" '[[ $(cat "$W/rc") == 1 && -f 
 # ======================================================================= dictation
 export XDG_CONFIG_HOME=$W/xdg GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null   # the user's global gitignore must not matter
 export XDG_RUNTIME_DIR=$W/run FAKE_PW_LOG=$W/pw.log FAKE_YDOTOOL_LOG=$W/ydo.log FAKE_CLIP=$W/clip FAKE_GSETTINGS=$W/gs
-dfresh() { fresh; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null; rm -rf "$XDG_RUNTIME_DIR" "$W/pw.log" "$W/ydo.log" "$W/clip" "$W/gate"; unset FAKE_MIC_MISSING FAKE_PW_FAIL FAKE_YDOTOOL_FAIL FAKE_ENGINE_TEXT FAKE_ENGINE_SECONDS FAKE_PW_GATE FAKE_PW_CHUNKS FAKE_ENGINE_LOAD_DELAY FAKE_ENGINE_CLEAN_TEXT FAKE_ENGINE_CLEAN_SECONDS FAKE_ENGINE_CLEAN_FAIL FAKE_TMUX_CLIENTS FAKE_TMUX_PANES FAKE_TMUX_SEND_FAIL; rm -f "$W/tmux.log" "$W/kitty.log" "$W/sig"; }
+dfresh() { fresh; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null; rm -rf "$XDG_RUNTIME_DIR" "$W/pw.log" "$W/ydo.log" "$W/clip" "$W/gate"; unset HB_CLAUDE_PANE TMUX_PANE FAKE_TMUX_SESSENV FAKE_TMUX_SESSION FAKE_MIC_MISSING FAKE_PW_FAIL FAKE_YDOTOOL_FAIL FAKE_ENGINE_TEXT FAKE_ENGINE_SECONDS FAKE_PW_GATE FAKE_PW_CHUNKS FAKE_ENGINE_LOAD_DELAY FAKE_ENGINE_CLEAN_TEXT FAKE_ENGINE_CLEAN_SECONDS FAKE_ENGINE_CLEAN_FAIL FAKE_TMUX_CLIENTS FAKE_TMUX_PANES FAKE_TMUX_SEND_FAIL; rm -f "$W/tmux.log" "$W/kitty.log" "$W/sig"; }
 DAILY=$A/steno-$(date +%F).txt
 BLK='[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}'
 
@@ -350,35 +350,47 @@ check "encoder fails: logged with the reason; no audio file" 'grep -q "ERROR liv
 unset FAKE_FF_ENC_FAIL FAKE_FF_ENC_LOG
 
 echo "== live: Send to Claude (tmux)"
-export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
-dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+dfresh; mkdir -p "$W/gate"; export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
 runcore '
 from stenographr import tmuxsend
-default, panes = tmuxsend.choose_target()
-print("TARGET:", default, sorted(panes))
+default, pane, panes, note = tmuxsend.choose_target()
+print("TARGET:", default, pane, sorted(panes), note)
 s = start(); wait(lambda: s.phrases == ["one"]); go(2); go(3); wait(lambda: len(s.phrases) == 3); s.request_stop(); s.record_thread.join(10); s.clean()
-print("STATUS:", s.deliver("send", default))
+print("STATUS:", s.deliver("send", default, pane))
 ' > "$W/core.out" 2>&1
-check "one attached client whose session has a claude pane: that session is the target" 'grep -qx "TARGET: alpha \[.alpha., .beta.\]" "$W/core.out"'
+check "HB_CLAUDE_PANE in our environment, pane exists: that pane is the target (its session), no picker" 'grep -qx "TARGET: alpha %0 \[.alpha., .beta.\] None" "$W/core.out"'
 check "Send: the text on ONE line (no trailing space) in one send-keys -l call to alpha's pane (%0), then exactly one Enter key, in that order" '[[ $(grep -c "^send-keys|" "$W/tmux.log") == 2 ]] && [[ $(grep "^send-keys|" "$W/tmux.log" | sed -n 1p) == "send-keys|-t|%0|-l|--|Clean 15 seconds. Second sentence.|" && $(grep "^send-keys|" "$W/tmux.log" | sed -n 2p) == "send-keys|-t|%0|Enter|" ]]'
 check "end line: sent to claude alpha; nothing on the clipboard" '[[ ! -e $W/clip ]] && grep -qx "STATUS: ok · sent to claude alpha" "$W/core.out" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok · sent to claude alpha$"'
-dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+dfresh; mkdir -p "$W/gate"; export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
 runcore 's = start(); wait(lambda: s.phrases == ["one"]); go(2); go(3); wait(lambda: len(s.phrases) == 3); s.request_stop(); s.record_thread.join(10); s.clean(); print("STATUS:", s.deliver("append", "alpha"))' > "$W/core.out" 2>&1
 check "Append: the text plus ONE trailing space in one send-keys -l call, and NO Enter" '[[ $(grep -c "^send-keys|" "$W/tmux.log") == 1 ]] && grep -qxF "send-keys|-t|%0|-l|--|Clean 15 seconds. Second sentence. |" "$W/tmux.log" && ! grep -qi "enter" "$W/tmux.log"'
 check "end line: appended to claude alpha" 'grep -qx "STATUS: ok · appended to claude alpha" "$W/core.out" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok · appended to claude alpha$"'
-dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_SEND_FAIL=1 FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude'
+dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_SEND_FAIL=1 HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude'
 runcore 's = start(); wait(lambda: s.phrases == ["one"]); s.request_stop(); s.record_thread.join(10); s.clean(); print("STATUS:", s.deliver("send", "alpha"))' > "$W/core.out" 2>&1
 check "tmux send fails: end line FAILED: send to claude failed, logged" 'grep -qx "STATUS: FAILED: send to claude failed, see steno.log" "$W/core.out" && grep -q "ERROR live send to claude alpha failed" "$LOG"'
 unset FAKE_TMUX_SEND_FAIL
-dfresh; export FAKE_TMUX_CLIENTS="alpha\nbeta" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
-runcore 'from stenographr import tmuxsend; d, p = tmuxsend.choose_target(); print("TARGET:", d, sorted(p))' > "$W/core.out" 2>&1
-check "several clients: ambiguous, no default; the list holds the sessions that have a claude pane" 'grep -qx "TARGET: None \[.alpha., .beta.\]" "$W/core.out"'
-export FAKE_TMUX_CLIENTS="gamma" FAKE_TMUX_PANES='gamma\t%5\tbash\nbeta\t%2\tclaude'
-runcore 'from stenographr import tmuxsend; d, p = tmuxsend.choose_target(); print("TARGET:", d, sorted(p))' > "$W/core.out" 2>&1
-check "the attached session has no claude pane but another does: ambiguous, list of those that do" 'grep -qx "TARGET: None \[.beta.\]" "$W/core.out"'
-export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tbash'
-runcore 'from stenographr import tmuxsend; d, p = tmuxsend.choose_target(); print("TARGET:", d, sorted(p))' > "$W/core.out" 2>&1
-check "no claude pane anywhere: no target" 'grep -qx "TARGET: None \[\]" "$W/core.out"'
+dfresh; export FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+runcore 'from stenographr import tmuxsend; d, pn, p, nt = tmuxsend.choose_target(); print("TARGET:", d, pn, sorted(p), nt)' > "$W/core.out" 2>&1
+check "nothing set (not in hyperbeam): no target; the picker list holds the sessions that have a claude pane" 'grep -qx "TARGET: None None \[.alpha., .beta.\] None" "$W/core.out"'
+export FAKE_TMUX_PANES='gamma\t%5\tbash\nbeta\t%2\tclaude'
+runcore 'from stenographr import tmuxsend; d, pn, p, nt = tmuxsend.choose_target(); print("TARGET:", d, pn, sorted(p), nt)' > "$W/core.out" 2>&1
+check "nothing set, one other session has a claude pane: the picker lists it" 'grep -qx "TARGET: None None \[.beta.\] None" "$W/core.out"'
+export FAKE_TMUX_PANES='alpha\t%0\tbash'
+runcore 'from stenographr import tmuxsend; d, pn, p, nt = tmuxsend.choose_target(); print("TARGET:", d, pn, sorted(p), nt)' > "$W/core.out" 2>&1
+check "no claude pane anywhere: no target" 'grep -qx "TARGET: None None \[\] None" "$W/core.out"'
+export FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+export TMUX_PANE=%9 FAKE_TMUX_SESSION=beta FAKE_TMUX_SESSENV='HB_CLAUDE_PANE=%2'
+runcore 'from stenographr import tmuxsend; d, pn, p, nt = tmuxsend.choose_target(); print("TARGET:", d, pn, sorted(p), nt)' > "$W/core.out" 2>&1
+check "only the session environment has it (our pane's session -> show-environment): same, pane %2, session beta, no picker" 'grep -qx "TARGET: beta %2 \[.alpha., .beta.\] None" "$W/core.out" && grep -q "^show-environment|-t|beta|HB_CLAUDE_PANE|" "$W/tmux.log"'
+export HB_CLAUDE_PANE=%0
+runcore 'from stenographr import tmuxsend; d, pn, p, nt = tmuxsend.choose_target(); print("TARGET:", d, pn, sorted(p), nt)' > "$W/core.out" 2>&1
+check "the environment variable wins over the session environment" 'grep -qx "TARGET: alpha %0 \[.alpha., .beta.\] None" "$W/core.out"'
+export HB_CLAUDE_PANE=%77
+runcore 'from stenographr import tmuxsend; d, pn, p, nt = tmuxsend.choose_target(); print("TARGET:", d, pn, sorted(p), nt)' > "$W/core.out" 2>&1
+check "stale id: the notice 'hyperbeam's Claude pane not found', no target (picker)" 'grep -qx "TARGET: None None \[.alpha., .beta.\] hyperbeam.s Claude pane not found" "$W/core.out"'
+unset HB_CLAUDE_PANE TMUX_PANE FAKE_TMUX_SESSION FAKE_TMUX_SESSENV
+unset HB_CLAUDE_PANE
 
 echo "== live screen (Textual, headless pilot)"
 UPRE='
@@ -397,7 +409,7 @@ def logtext(app): return [("".join(s.text for s in l)).strip() for l in app.quer
 '
 runui() { ( export FAKE_PW_GATE=$W/gate FAKE_ENGINE_TEXT="one|two|three" FAKE_ENGINE_CLEAN_TEXT="Clean {secs} seconds." FAKE_ENGINE_CLEAN_SECONDS=100; "$PY" -c "$LPRE$UPRE
 $1" ); }
-dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+dfresh; mkdir -p "$W/gate"; export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
 runui '
 async def main():
     app = LiveApp(cfg, log, "cpu", popup=True)
@@ -418,7 +430,7 @@ asyncio.run(main())
 check "screen: banner text, each phrase shown as recognised, only Stop visible while recording" 'grep -q "^BANNER: Live preview · final text is cleaned up when you stop" "$W/ui.out" && grep -q "^RECORDING: \[.one.\] {.start.: False, .stop.: True, .copy.: False, .append.: False, .send.: False, .new.: False, .close.: False, .stopit.: False, .cancel.: False}" "$W/ui.out"'
 check "popup, after Stop: the clean text and exactly Copy, Claude append (a), Claude send (e), Close (no New); the project name is at the right end of the bar" 'grep -q "^REVIEW: \[.Clean 15 seconds..\]" "$W/ui.out" && grep -q ".append.: (.Claude append (a)., False, True)" "$W/ui.out" && grep -q ".send.: (.Claude send (e)., False, True)" "$W/ui.out" && grep -qF "Close (q / Esc)" "$W/ui.out" && grep -q ".new.: (.New (r)., False, False)" "$W/ui.out" && grep -qx "BANNER-R: alpha" "$W/ui.out"'
 check "clicking Claude send: the text typed to %0, then one Enter; the window exits; end line sent to claude alpha" 'grep -q "^EXITED" "$W/ui.out" && [[ $(grep -c "^send-keys|" "$W/tmux.log") == 2 ]] && grep -qxF "send-keys|-t|%0|-l|--|Clean 15 seconds.|" "$W/tmux.log" && grep -qxF "send-keys|-t|%0|Enter|" "$W/tmux.log" && tail -1 "$DAILY" | grep -qE "· ok · sent to claude alpha$"'
-dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tbash'
+dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_PANES='alpha\t%0\tbash'
 runui '
 async def main():
     app = LiveApp(cfg, log, "cpu", popup=True)
@@ -433,7 +445,7 @@ asyncio.run(main())
 ' > "$W/ui.out" 2>&1
 check "no claude pane: both Claude buttons are disabled (and their keys do nothing)" 'grep -q "^CLAUDE: (.Claude append (a)., True, True) (.Claude send (e)., True, True)" "$W/ui.out" && grep -q "^PHASE-AFTER-AE: review" "$W/ui.out" && ! grep -q "^send-keys" "$W/tmux.log" 2>/dev/null'
 check "the keys work too: s stops, y copies the clean text" 'grep -q "^EXITED" "$W/ui.out" && [[ $(cat "$W/clip") == "Clean 15 seconds. " ]] && tail -1 "$DAILY" | grep -qE "· ok · copied$"'
-dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha\nbeta" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
 runui '
 async def main():
     app = LiveApp(cfg, log, "cpu", popup=True)
@@ -449,6 +461,23 @@ asyncio.run(main())
 ' > "$W/ui.out" 2>&1
 check "ambiguous (two clients): Claude append opens a list of sessions with a claude pane; picking beta appends there (text + space, no Enter)" 'grep -q "^CLAUDE: Claude append (a)" "$W/ui.out" && grep -q "^PICKER: PickSession \[.alpha., .beta.\]" "$W/ui.out" && grep -q "^EXITED" "$W/ui.out" && grep -qxF "send-keys|-t|%2|-l|--|Clean 15 seconds. |" "$W/tmux.log" && ! grep -qi "enter" "$W/tmux.log" && tail -1 "$DAILY" | grep -qE "· ok · appended to claude beta$"'
 
+dfresh; mkdir -p "$W/gate"; export HB_CLAUDE_PANE=%77 FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+runui '
+async def main():
+    app = LiveApp(cfg, log, "cpu", popup=True)
+    async with app.run_test(size=(80, 25)) as pilot:
+        await until(pilot, lambda: logtext(app) == ["one"]); go(2); go(3); await until(pilot, lambda: len(logtext(app)) == 3)
+        await click(pilot, "#stop"); await until(pilot, lambda: app.phase == "review")
+        print("STATUS:", app.screen.query_one("#status").content)
+        await click(pilot, "#append"); await pilot.pause(0.3)
+        print("PICKER:", type(app.screen).__name__)
+        await pilot.press("escape"); await pilot.pause(0.2)
+    print("EXITED")
+asyncio.run(main())
+' > "$W/ui.out" 2>&1
+check "UI, stale id: status shows hyperbeam's Claude pane not found, Append opens the picker" 'grep -q "^STATUS: .*hyperbeam.s Claude pane not found" "$W/ui.out" && grep -q "^PICKER: PickSession" "$W/ui.out"'
+unset HB_CLAUDE_PANE
+
 echo "== live loop (pane / terminal instance)"
 UPRE2='
 def status(app): return str(app.query_one("#status").content)
@@ -457,7 +486,7 @@ def shown(app): return [b.id for b in app.screen.query("Button") if b.display]
 '
 runui2() { ( export FAKE_PW_GATE=$W/gate FAKE_ENGINE_TEXT="one|two|three" FAKE_ENGINE_CLEAN_TEXT="Clean {secs} seconds." FAKE_ENGINE_CLEAN_SECONDS=100 FAKE_ENGINE_COUNT=$W/count; "$PY" -c "$LPRE$UPRE$UPRE2
 $1" ); }
-dfresh; mkdir -p "$W/gate"; : > "$W/count"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude'
+dfresh; mkdir -p "$W/gate"; : > "$W/count"; export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude'
 runui2 '
 async def main():
     app = LiveApp(cfg, log, "cpu")
@@ -486,7 +515,7 @@ check "after Copy: back on Ready with 'Last: copied · HH:MM'; after Send: 'Last
 check "two captures: two session blocks (end words copied / sent to claude alpha), two audio files, the typed text + one Enter, the clipboard has the clean text plus a space" '[[ $(grep -c "^start:" "$DAILY") == 2 && $(ls "$A/audio" | wc -l) == 2 ]] && grep -qE "· ok · copied$" "$DAILY" && grep -qE "· ok · sent to claude alpha$" "$DAILY" && [[ $(grep -c "^send-keys|" "$W/tmux.log") == 2 && $(cat "$W/clip") == "Clean 15 seconds. " ]]'
 check "the model was constructed ONCE for the whole app (two captures)" '[[ $(grep -c . "$W/count") == 1 ]] && [[ $(grep -c "engine loaded" "$LOG") == 1 ]]'
 check "no 'no running event loop' anywhere in the log (a capture ending and another beginning)" '! grep -q "no running event loop" "$LOG" && ! grep -q "ERROR" "$LOG"'
-dfresh; mkdir -p "$W/gate"; : > "$W/count"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude'
+dfresh; mkdir -p "$W/gate"; : > "$W/count"; export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude'
 runui2 '
 async def main():
     app = LiveApp(cfg, log, "cpu")
@@ -538,7 +567,7 @@ asyncio.run(main())
 ' > "$W/ui.out" 2>&1
 check "a stale 'recording' entry does not block Start: no notice, records, the entry is cleaned" 'grep -q "^STALE-IGNORED: recording" "$W/ui.out" && [[ ! -e $REG/999997.json ]]'
 
-dfresh; mkdir -p "$W/gate"; : > "$W/count"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude' FAKE_PANE_FILE=$W/pane
+dfresh; mkdir -p "$W/gate"; : > "$W/count"; export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude' FAKE_PANE_FILE=$W/pane
 printf 'take1\ntake2\ntake3\n' > "$W/seq"; rm -f "$W/pane"
 FAKE_ENGINE_CLEAN_SEQ=$W/seq runui2 '
 async def take(pilot, app):
@@ -563,7 +592,7 @@ check "end words: appended to claude alpha (x2), then sent to claude alpha; thre
 unset FAKE_PANE_FILE
 
 echo "== live screen adapts to the terminal size (tall sidebar ... wide pane)"
-dfresh; mkdir -p "$W/gate"; : > "$W/count"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude'
+dfresh; mkdir -p "$W/gate"; : > "$W/count"; export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude'
 runui2 '
 def misfit(app, w, h):
     bad = []
@@ -594,7 +623,7 @@ for sz in 28x40 36x30 60x25 80x25 120x20; do
 done
 
 echo "== live popup"
-dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude'
+dfresh; mkdir -p "$W/gate"; export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude'
 runui2 '
 async def main():
     app = LiveApp(cfg, log, "cpu", popup=True)

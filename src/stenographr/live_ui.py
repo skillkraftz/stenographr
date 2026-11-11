@@ -113,6 +113,7 @@ class LiveApp(App):
         self._texts = {"status": "", "last": ""}
         self.other: dict | None = None             # the instance that is recording, during the notice
         self.claude_default: str | None = None
+        self.claude_pane: str | None = None
         self.claude_panes: dict[str, str] = {}
 
     # ------------------------------------------------------------ layout
@@ -346,11 +347,11 @@ class LiveApp(App):
             self._show(*again, "close")
             return
         log.write(text)
-        self._status("Clean-up failed: this is the live text (see steno.log)" if session.clean_failed
-                     else "Clean text:")
-        self.claude_default, self.claude_panes = tmuxsend.choose_target()
+        self.claude_default, self.claude_pane, self.claude_panes, notice = tmuxsend.choose_target()
+        self._status(("Clean-up failed: this is the live text (see steno.log)" if session.clean_failed
+                      else "Clean text:") + (f" ({notice})" if notice else ""))
         for bid in ("append", "send"):
-            self.query_one(f"#{bid}", Button).disabled = not self.claude_panes      # no claude pane: both disabled
+            self.query_one(f"#{bid}", Button).disabled = not (self.claude_pane or self.claude_panes)   # no target: both disabled
         self._project(self.claude_default or "")
         self.phase = "review"
         self._show("copy", "append", "send", *again, "close")
@@ -397,10 +398,10 @@ class LiveApp(App):
         self._claude("send")
 
     def _claude(self, choice: str) -> None:
-        if self.phase != "review" or not self.claude_panes or not self.session or not self.session.text():
+        if self.phase != "review" or not (self.claude_pane or self.claude_panes) or not self.session or not self.session.text():
             return
         if self.claude_default:
-            self._choose(choice, self.claude_default)
+            self._choose(choice, self.claude_default, self.claude_pane)
             return
         self.phase = "picking"
 
@@ -418,9 +419,9 @@ class LiveApp(App):
         else:
             self._to_ready()
 
-    def _choose(self, choice: str, claude_session: str | None = None) -> None:
+    def _choose(self, choice: str, claude_session: str | None = None, pane: str | None = None) -> None:
         session = self.session
-        status = session.deliver(choice, claude_session)
+        status = session.deliver(choice, claude_session, pane)
         if status.startswith("FAILED"):                # keep the text on screen so it can be copied by hand
             self.phase = "error"
             self._status(status)
