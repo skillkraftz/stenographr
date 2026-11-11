@@ -97,7 +97,8 @@ end: 2026-11-10 20:07:30 · 1m30s · ok · copied
 - **`live` blocks (changed 2026-11-10):** the live phrases are appended as they are recognised (so a crash
   keeps everything said); `clean:` and the clean lines are appended when the session has been
   re-transcribed in one pass; the end line carries what was done with the clean text: `ok · copied`,
-  `ok · sent to claude <session>`, `ok · not copied`, `ok · not copied (window closed)`, or `FAILED: ...`
+  `ok · sent to claude <session>`, `ok · new take`, `ok · closed`, `ok · not copied (window closed)` (the window
+  went away), or `FAILED: ...`
   (`clipboard failed`, `send to claude failed`, `clean pass failed`). If the clean pass failed but a choice was
   made, the live text is what was delivered and the end line says so. A session killed hard has the start line,
   the live lines and the audio pointer and no end line.
@@ -162,35 +163,57 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
 - **Clip:** section 1.
 - **Live screen**, `stenographr live` (changed 2026-11-10; replaces the old type mode and its ydotool code, which
   typed each phrase into whatever window was focused, broke sentences at every pause, and leaked Ctrl into the typed
-  keys). Textual, in the current terminal (a kitty window or a tmux pane). It never types into other windows.
-  - Banner "Live preview · final text is cleaned up when you stop". Records `scarlett-mic` exactly like notes
-    (48 kHz, channel 1, audio to `<archive>/audio/YYYY-MM-DD-HHMMSS-live.opus`), shows each phrase as it is
-    recognised and appends it, timestamped, to the daily file as it goes. Mode `live`, target `unknown`.
-  - Stop: Ctrl+` again (`stenographr live --toggle` sends SIGUSR1), the Stop button, or `s`. It shows
-    "Cleaning up…", re-transcribes the session's whole audio in one pass (below), writes the `clean:` block, then
-    shows the clean text and three buttons: **Copy (y)** (`wl-copy` the clean text), **Send to Claude · <session>
-    (c)** (types the clean text as ONE line into that session's Claude Code input, never Enter), **Don't copy (n)**.
-    Any choice writes the end line and exits (the kitty window closes). If delivery fails the text stays on screen
-    and the end line says FAILED.
-  - **Clean pass:** the session's 16 kHz audio is kept in memory while recording (the same samples the audio file
-    got) and decoded once at the end by `engine.transcribe_long`: Silero VAD with 0.3 s pauses and a 30 s cap, neighbouring
-    segments merged into chunks of up to ~30 s and cut only at the longest pauses, each chunk decoded in one go.
-    That keeps sentences whole (the live stream cuts at every 0.6 s pause and loses context: "is Only Acceptable
-    to use. when the work will grow." becomes one sentence). About 0.03 x realtime on CPU or GPU; a 30 s chunk
-    needs ~1.2 GB of VRAM at most on a 4 GB card, and the GPU->CPU fallback applies as everywhere.
+  keys). Textual. It never types into other windows. Banner "Live preview · final text is cleaned up when you stop".
+  A capture records `scarlett-mic` exactly like notes (48 kHz, channel 1, audio to
+  `<archive>/audio/YYYY-MM-DD-HHMMSS-live.opus`), shows each phrase as it is recognised and appends it,
+  timestamped, to the daily file as it goes. Mode `live`, target `unknown`. Several instances can be open at once
+  (changed 2026-11-10: one per tmux pane is expected); there are two kinds.
+  - **Popup** (`stenographr live --popup`; opened by Ctrl+`): a kitty window, 80x25. Starts recording at once. Stop
+    (`s` or the button) -> "Cleaning up…" -> the clean text with **Copy (y)**, **Send to Claude · <session> (c)**,
+    **Close (q / Esc)**. Any choice writes the clean block and end line, then exits (the window closes).
+  - **Loop** (`stenographr live` started any other way, in a terminal or tmux pane; driven only by clicking, the
+    hotkey never touches it): opens on **Ready** (buttons **Start** (Enter or `r`) and **Close** (`q`); the
+    microphone is not open, so GNOME's mic icon is off). Start -> recording -> Stop -> cleaning up -> the clean text
+    with **Copy (y)** (wl-copy, back to Ready), **Send to Claude · <session> (c)** (back to Ready), **New (r)**
+    (delivers nothing, back to Ready), **Close (q / Esc)** (delivers nothing, quits). The Ready screen shows the
+    last action and its time ("Last: sent to claude alpha · 22:14"). Every capture is its own session block with
+    its own audio file.
+  - **The model is loaded once** per app, in the background at start, and kept for the app's lifetime (`Engines`,
+    now locked so a capture and the preload never build it twice). A capture started before it has loaded still keeps
+    all its audio (the recorder runs first and is queued). GPU memory is freed when the app quits. Measured
+    2026-11-10: each open instance holds about 670 MiB of GPU memory (model + CUDA context + the arena after a
+    clean pass); three instances were 2.0 GB above a 0.7 GB desktop baseline. The existing free-VRAM check (1000 +
+    500 MiB) sends an instance that starts without room to the CPU.
+  - **One recording at a time.** Every instance registers `<runtime state dir>/live/<pid>.json` = {pid, kind
+    (popup|loop), where (the tmux session of its pane, `terminal`, or `popup`), recording}; entries whose process
+    is gone are ignored and removed. Before any instance starts recording (a popup opening, or Start in a loop) it
+    looks for another instance that is recording. If there is one it shows "Recording in <where>. Stop it and
+    record here?" with **Stop it and record here** (`y`) and **Cancel** (`n` / Esc). Stop it sends SIGUSR1 to the
+    other instance (it stops, shows its own clean text and buttons, and stays open: it is never closed or killed),
+    waits until it has let go of the microphone, then records here. Cancel: a popup closes, a loop goes back to Ready.
+  - **Ctrl+` (`stenographr live --toggle`) only ever looks at popups.** A popup is recording -> it is stopped
+    (SIGUSR1). A popup exists in any other state (notice, cleaning, buttons) -> nothing. No popup (and none was
+    launched in the last 10 s) -> kitty opens a window, 80x25, titled "stenographr live" (`-o initial_window_width=80c
+    -o initial_window_height=25c -o remember_window_size=no`), running `stenographr live --popup`. Loop instances,
+    ready or recording, are never signalled. Always-on-top is not possible here (see below).
+  - After "Cleaning up…": the session's 16 kHz audio is kept in memory while recording (the same samples the audio file
+    got) and decoded once at the end by `engine.transcribe_long` (the **clean pass**): Silero VAD with 0.3 s pauses and a
+    30 s cap, neighbouring segments merged into chunks of up to ~30 s and cut only at the longest pauses, each chunk
+    decoded in one go. That keeps sentences whole (the live stream cuts at every 0.6 s pause and loses context: "is
+    Only Acceptable to use. when the work will grow." becomes one sentence). About 0.03 x realtime on CPU or GPU; a 30 s
+    chunk needs ~1.2 GB of VRAM at most, and the GPU->CPU fallback applies as everywhere. If delivery fails the text
+    stays on screen and the end line says FAILED.
   - **Claude target:** the pane whose `pane_current_command` is `claude` (found with `tmux list-panes -a`, no
     hyperbeam code). If exactly one tmux client is attached and its session has a Claude pane, that session is the
     target. If several clients are attached, or the attached session has none but others do, the button opens a
     short list of the sessions that have one. With none, the button is disabled. Text goes in with
     `tmux send-keys -t <pane> -l -- <one line>`, which appends to the input without submitting.
-  - **`stenographr live --toggle`** (what Ctrl+` runs): if a live session is running anywhere (kitty window or tmux
-    pane; found through `$XDG_RUNTIME_DIR/stenographr/live.pid`, checked against /proc) it is sent SIGUSR1 (stop;
-    once stopped the signal does nothing); otherwise kitty opens a window, 80x25 cells, titled "stenographr
-    live" (`-o initial_window_width=80c -o initial_window_height=25c -o remember_window_size=no`), running
-    `stenographr live`. Always-on-top is not possible here (see below).
   - **Window closed any other way** (X button = SIGHUP, kill = SIGTERM): recording stops, the clean pass runs if it
     can, the end line says `ok · not copied (window closed)` (or `FAILED: clean pass failed`); nothing is
-    delivered. SIGKILL leaves the live lines and audio, no end line.
+    delivered. A second hang-up during this wrap-up is ignored. SIGKILL leaves the live lines and audio, no end line.
+    (Once, in PR #8's testing, a session logged `clean pass failed: RuntimeError: no running event loop` during such
+    a shutdown; it was not reproducible in 2026-11-10's tests of back-to-back captures, stops from another
+    instance, repeated signals and tmux panes, and the log now records where a clean-pass failure happened.)
   - Verified 2026-11-10: kitty `-o linux_display_server=x11 -o remember_window_size=no -o initial_window_width=80c
     -o initial_window_height=25c` gives exactly 25 rows x 80 columns; when that window closed, X focus went back to
     the previously active window. Always on top: GNOME/Wayland has no API for it; for an XWayland window it would take
@@ -224,7 +247,7 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
   AUX0: the voice; AUX1 is silent). The node is checked before recording; if it is missing nothing is
   recorded, the daily file gets `FAILED: mic scarlett-mic not found` and it is logged. Never another input.
 - **Hotkey:** `stenographr keybinding install` adds (or updates) a GNOME custom keybinding "stenographr dictation",
-  `<Control>grave`, command = the absolute path of `stenographr` + ` live --toggle`; it appends to the existing
+  `<Control>grave`, command = the absolute path of `stenographr` + ` live --toggle` (it only opens or stops the popup); it appends to the existing
   list and never changes other entries. `stenographr keybinding remove` removes only that entry.
 - Needs `pw-record`, `pw-dump`, `ffmpeg` (with libopus), `wl-copy`, `kitty` (for the Ctrl+` window), `tmux` (only for Send to
   Claude), `git` (notes mode only); the one Python dependency added for this is `textual`.
