@@ -1,6 +1,7 @@
 """Engine reuse and the CPU/GPU decision, shared by `clip`, `notes` and `live`."""
 from __future__ import annotations
 
+import threading
 import time
 
 from . import clip as clipmod
@@ -16,19 +17,21 @@ class Engines:
         self.cfg, self.log = cfg, log
         self.built: dict[str, object] = {}
         self.failed: dict[str, Exception] = {}       # a device that could not be built stays failed for the run
+        self._lock = threading.Lock()                # the live app preloads in a thread while a capture may ask too
 
     def get(self, device: str, name: str):
-        if device in self.failed:
-            raise self.failed[device]
-        if device not in self.built:
-            t0 = time.monotonic()
-            try:
-                self.built[device] = make_engine(self.cfg, device)
-            except Exception as e:                   # noqa: BLE001
-                self.failed[device] = e
-                raise
-            self.log.info(name, f"engine loaded: device={device} load={time.monotonic() - t0:.2f}s")
-        return self.built[device]
+        with self._lock:                             # built once; a second caller waits for the first to finish
+            if device in self.failed:
+                raise self.failed[device]
+            if device not in self.built:
+                t0 = time.monotonic()
+                try:
+                    self.built[device] = make_engine(self.cfg, device)
+                except Exception as e:               # noqa: BLE001
+                    self.failed[device] = e
+                    raise
+                self.log.info(name, f"engine loaded: device={device} load={time.monotonic() - t0:.2f}s")
+            return self.built[device]
 
 
 def pick_device(cfg, log: Log, name: str, requested: str) -> str:

@@ -73,13 +73,21 @@ alias steno='stenographr notes'
 alias recall='stenographr recall'
 ```
 
-- `stenographr live`: a Textual screen (80x25, in the current terminal) that never types into other windows. It shows each
-  phrase as you speak (and appends it to the daily file), and when you stop it re-transcribes the whole session in one
-  pass to get whole sentences. Then: **Copy (y)** puts the clean text on the clipboard, **Send to Claude · session (c)**
-  types it as one line into that tmux session's Claude Code input (never presses Enter), **Don't copy (n)** does nothing.
-  `stenographr live --toggle` is what Ctrl+` runs: if a live session is running it stops it, otherwise it opens a kitty
-  window with one. Closing the window any other way stops it without delivering; the live lines and the audio are
-  already saved.
+- `stenographr live`: a Textual screen that never types into other windows. It shows each phrase as you speak (and
+  appends it to the daily file), and when you stop it re-transcribes the whole session in one pass to get whole
+  sentences. Two kinds of instance, and several can be open at once:
+  - **Loop** (`stenographr live` in a terminal or tmux pane): opens on **Ready** (mic closed). **Start** (Enter or `r`) ->
+    recording -> **Stop** (`s`) -> clean text with **Copy (y)** (clipboard, back to Ready), **Send to Claude · session (c)**
+    (types it as one line into that tmux session's Claude Code input, never presses Enter; back to Ready), **New (r)**
+    (nothing delivered, back to Ready) and **Close (q / Esc)**. Ready shows "Last: sent to claude alpha · 22:14". The model
+    loads once per app. Each capture is its own session block and audio file.
+  - **Popup** (opened by Ctrl+`, which runs `stenographr live --toggle`): a kitty window, 80x25, that records at once;
+    Stop gives **Copy**, **Send to Claude** and **Close**, then the window closes. Ctrl+` while a popup is recording stops
+    it; otherwise it does nothing while a popup is open; it never touches loop instances.
+  - **One recording at a time:** starting while another instance records shows "Recording in <where>. Stop it and record
+    here?" (**Stop it and record here** / **Cancel**). Stop it makes the other instance stop and show its own clean text;
+    it stays open.
+  Closing a window any other way stops it without delivering; the live lines and the audio are already saved.
 - `stenographr notes` (`steno`): live in the terminal until Ctrl+C. Each sentence is printed, and appended at once
   to the notes file and to the daily file. Inside a git repo the notes file is `<repo root>/steno/steno-YYYY-MM-DD.txt`
   (and `steno/` is added to the repo's `.gitignore` if git isn't ignoring it yet); elsewhere it is

@@ -1,15 +1,20 @@
 """`stenographr live`: the live session core (no UI here; live_ui.py is the Textual screen).
 
-Flow: record (live phrases shown and appended to the daily file as they come) -> stop -> clean pass (the session's
-whole audio in one go, whole sentences) -> the user picks Copy / Send to Claude / Don't copy -> clean block + end
-line in the daily file. It never types into other windows.
+Two kinds of instance (see SPEC.md):
+  popup  opened by Ctrl+` (`live --toggle`) in a kitty window: records at once, one capture, then the window closes.
+  loop   `stenographr live` in a terminal or tmux pane: a ready screen, any number of captures; the model is loaded
+         once for the app's lifetime.
+
+One capture = a LiveSession: record (live phrases shown and appended to the daily file as they come) -> stop ->
+clean pass (the session's whole audio in one go, whole sentences) -> the user's choice -> clean block + end line in
+the daily file. It never types into other windows. Only one instance records at a time (registry.py).
 
 Daily block:
   start: ... · live · unknown · audio/<...>-live.opus
   [HH:MM:SS] <live phrase>        (as they come, so a crash keeps everything said)
   clean:
   [HH:MM:SS] <clean sentence or paragraph>
-  end: ... · 1m30s · ok · copied
+  end: ... · 1m30s · ok · copied          (copied | sent to claude <session> | new take | closed)
 """
 from __future__ import annotations
 
@@ -20,61 +25,86 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from pathlib import Path
 
-from . import daily, tmuxsend
-from .dictate import LiveResult, _copy, _fail_block, _live, _state_dir
+from . import daily, registry, tmuxsend
+from .dictate import LiveResult, _copy, _fail_block, _live
 from .log import Log
 from .record import SR, mic_exists
-from .runner import transcribe_audio
+from .runner import Engines, transcribe_audio
 
 NAME = "live"
+WORDS = {"copy": "copied", "new": "new take", "close": "closed"}       # claude: "sent to claude <session>"
 
 
-# ---------------------------------------------------------------- the running-session marker
+def detect_where(popup: bool) -> str:
+    """Where this instance runs: 'popup', the tmux session name of its pane, or 'terminal'."""
+    if popup:
+        return "popup"
+    if os.environ.get("TMUX"):
+        pane = os.environ.get("TMUX_PANE")
+        try:
+            r = subprocess.run(["tmux", "display-message", "-p"] + (["-t", pane] if pane else []) + ["#{session_name}"],
+                               capture_output=True, text=True, timeout=5)
+            if r.returncode == 0 and r.stdout.strip():
+                return r.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return "terminal"
 
-def _pidfile() -> Path:
-    return _state_dir() / "live.pid"
 
-
-def find_running() -> int | None:
-    """The pid of a running `stenographr live` (checked against /proc, so a stale file or reused pid doesn't count)."""
-    try:
-        pid = int(_pidfile().read_text().split()[0])
-        args = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
-        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
-    except (OSError, ValueError, IndexError):
-        return None
-    ours = any(b"stenographr" in a for a in args) and b"live" in args and b"--toggle" not in args
-    return pid if ours and state != "Z" else None
-
+# ---------------------------------------------------------------- Ctrl+`
 
 def toggle(cfg, log: Log, config_arg: str | None = None) -> int:
-    """Ctrl+`: a live session is running -> tell it to stop (SIGUSR1); otherwise open a kitty window with one."""
-    pid = find_running()
-    if pid:
-        os.kill(pid, signal.SIGUSR1)
-        log.info(NAME, f"stop requested (pid {pid})")
+    """Ctrl+`. Only popups matter here; pane/terminal instances are never touched.
+      a popup is recording -> stop it;  a popup exists otherwise (notice, cleaning, buttons) -> nothing;
+      no popup (and none being launched) -> open a kitty window with one."""
+    popups = [i for i in registry.instances() if i["kind"] == "popup"]
+    if popups:
+        if popups[0]["recording"]:
+            os.kill(popups[0]["pid"], signal.SIGUSR1)
+            log.info(NAME, f"stop requested (popup pid {popups[0]['pid']})")
         return 0
+    if registry.launching_recently():
+        return 0                                   # a popup is on its way up: never open a second one
     kitty = shutil.which("kitty")
     if not kitty:
         log.error(NAME, "kitty not found: cannot open the live window")
         return 1
+    registry.mark_launching()
     cmd = [kitty, "--title", "stenographr live", "--class", "stenographr-live",
            "-o", "initial_window_width=80c", "-o", "initial_window_height=25c", "-o", "remember_window_size=no",
-           sys.executable, "-m", "stenographr.cli"] + (["--config", config_arg] if config_arg else []) + ["live"]
+           sys.executable, "-m", "stenographr.cli"] + (["--config", config_arg] if config_arg else []) + ["live", "--popup"]
     subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      start_new_session=True)
-    log.info(NAME, "opened the live window")
+    log.info(NAME, "opened the live popup")
     return 0
 
 
-# ---------------------------------------------------------------- the session
+def stop_other(entry: dict, timeout: float = 20.0) -> bool:
+    """Tell the instance that is recording to stop (it moves to its own button step and stays open), and wait
+    until it has let go of the microphone. Never closes or kills it."""
+    try:
+        os.kill(entry["pid"], signal.SIGUSR1)
+    except OSError:
+        return True
+    t = time.time()
+    while time.time() - t < timeout:
+        cur = next((i for i in registry.instances() if i["pid"] == entry["pid"]), None)
+        if cur is None or not cur["recording"]:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+# ---------------------------------------------------------------- one capture
 
 class LiveSession:
-    def __init__(self, cfg, log: Log, requested: str):
+    def __init__(self, cfg, log: Log, requested: str, engines: Engines | None = None):
         self.cfg, self.log, self.requested = cfg, log, requested
+        self.engines = engines                     # shared for the app's lifetime (None: one per capture)
         self.stop_event = threading.Event()
         self.on_phrase = None                      # callback(text), called from the recording thread
         self.result: LiveResult | None = None
@@ -96,24 +126,14 @@ class LiveSession:
         self.done = True
         return f"mic {self.cfg.mic} not found"
 
-    def mark_running(self) -> None:
-        _state_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
-        _pidfile().write_text(f"{os.getpid()}\n")
-
-    def unmark_running(self) -> None:
-        try:
-            if _pidfile().read_text().split()[0] == str(os.getpid()):
-                _pidfile().unlink()
-        except (OSError, IndexError):
-            pass
-
     # -- record (blocking; runs in a thread)
     def record(self) -> LiveResult | None:
         start = dt.datetime.now()
         try:
             self.result = _live(self.cfg, self.log, self.requested, NAME, "live", "unknown",
                                 [(daily.daily_path(self.cfg.archive, start), None)], self._phrase,
-                                stop_event=self.stop_event, signals=False, finish=False, keep_pcm=True)
+                                stop_event=self.stop_event, signals=False, finish=False, keep_pcm=True,
+                                engines=self.engines)
         except Exception as e:                     # noqa: BLE001
             self.log.error(NAME, f"recording failed: {type(e).__name__}: {e}")
             _fail_block(self.cfg, self.log, NAME, "live", "unknown", start, "recording failed")
@@ -160,22 +180,21 @@ class LiveSession:
 
     # -- the user's choice
     def deliver(self, choice: str, claude_session: str | None = None) -> str:
-        """choice: copy | claude | none. Writes the end line and returns it ('ok · copied', 'FAILED: ...', ...)."""
+        """choice: copy | claude | new | close. Writes the end line and returns it
+        ('ok · copied', 'ok · sent to claude alpha', 'ok · new take', 'ok · closed', 'FAILED: ...')."""
         r = self.result
         base = r.status if r else daily.failed("recording failed")
         text = self.text()
-        how, problem = "not copied", None
+        how, problem = WORDS.get(choice, "closed"), None
         if choice == "copy" and text:
             try:
                 _copy(text)
-                how = "copied"
             except Exception as e:                 # noqa: BLE001
                 self.log.error(NAME, f"clipboard (wl-copy) failed: {type(e).__name__}: {e}")
                 problem = "clipboard failed"
         elif choice == "claude" and text:
             try:
-                pane = tmuxsend.claude_panes()[claude_session]
-                tmuxsend.send(pane, text)
+                tmuxsend.send(tmuxsend.claude_panes()[claude_session], text)
                 how = f"sent to claude {claude_session}"
             except Exception as e:                 # noqa: BLE001
                 self.log.error(NAME, f"send to claude {claude_session} failed: {type(e).__name__}: {e}")
@@ -226,18 +245,16 @@ class LiveSession:
 
 # ---------------------------------------------------------------- the entry point
 
-def run(cfg, log: Log, requested: str, headless: bool = False) -> int:
+def run(cfg, log: Log, requested: str, popup: bool = False, headless: bool = False) -> int:
     from .live_ui import LiveApp                   # Textual is only needed here
 
-    running = find_running()
-    if running:
-        print(f"stenographr: a live session is already running (pid {running})", file=sys.stderr)
-        return 1
-    session = LiveSession(cfg, log, requested)
-    app = LiveApp(session)
+    app = LiveApp(cfg, log, requested, popup=popup)
+    app.entry = registry.Entry("popup" if popup else "loop", detect_where(popup))
 
     def closing(*_):                               # window closed (SIGHUP) or killed (SIGTERM): finish up below
-        session.request_stop()
+        app.closing = True
+        if app.session:
+            app.session.request_stop()
         try:
             app.exit()
         except Exception:                          # noqa: BLE001
@@ -245,14 +262,14 @@ def run(cfg, log: Log, requested: str, headless: bool = False) -> int:
 
     for sig in (signal.SIGHUP, signal.SIGTERM):
         signal.signal(sig, closing)
-    session.mark_running()
     try:
         app.run(headless=headless)
     finally:
         for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):    # a second hang-up must not cut the wrap-up short
             signal.signal(sig, signal.SIG_IGN)
         try:
-            session.finalize_on_exit()
+            if app.session:
+                app.session.finalize_on_exit()
         finally:
-            session.unmark_running()
+            app.entry.remove()
     return 0

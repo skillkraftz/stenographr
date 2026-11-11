@@ -110,7 +110,7 @@ def cmd_live(args) -> int:
     cfg, log = _cfg_log(args)
     if args.toggle:
         return livemod.toggle(cfg, log, args.config)
-    return livemod.run(cfg, log, args.device or cfg.device, headless=args.headless)
+    return livemod.run(cfg, log, args.device or cfg.device, popup=args.popup, headless=args.headless)
 
 
 def cmd_notes(args) -> int:
@@ -158,8 +158,9 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: config (auto)")
     d.set_defaults(fn=cmd_notes)
     lv = sub.add_parser("live", help="live screen: phrases as you speak, clean text when you stop (never types)")
+    lv.add_argument("--popup", action="store_true", help="the Ctrl+` popup: records at once, one capture, then closes")
     lv.add_argument("--toggle", action="store_true",
-                    help="Ctrl+`: stop the running live session, or open a kitty window with one")
+                    help="Ctrl+`: stop the recording popup, or open a popup (never touches pane instances)")
     lv.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: config (auto)")
     lv.add_argument("--headless", action="store_true", help=argparse.SUPPRESS)      # tests: no terminal needed
     lv.set_defaults(fn=cmd_live)
