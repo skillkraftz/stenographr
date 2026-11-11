@@ -3,12 +3,14 @@
 #   FAKE_TMUX_CLIENTS  what `list-clients` prints (printf %b: sessions separated by \n)
 #   FAKE_TMUX_PANES    what `list-panes -a` prints: "session\tpane_id\tcommand" lines separated by \n
 #   FAKE_TMUX_SESSION  what `display-message -p #{session_name}` prints (the pane an instance runs in)
+#   FAKE_TMUX_SESSENV  what `show-environment -t <session> HB_CLAUDE_PANE` prints (e.g. HB_CLAUDE_PANE=%2); empty: unknown variable
 #   FAKE_TMUX_SEND_FAIL=1  send-keys fails
 #   FAKE_PANE_FILE     collects the typed text of a stand-in Claude pane; an Enter key shows as <ENTER>
 printf '%s|' "$@" >> "${FAKE_TMUX_LOG:-/dev/null}"; echo >> "${FAKE_TMUX_LOG:-/dev/null}"
 case $1 in
   list-clients) [ -n "$FAKE_TMUX_CLIENTS" ] && printf '%b\n' "$FAKE_TMUX_CLIENTS" ;;
   list-panes)   [ -n "$FAKE_TMUX_PANES" ] && printf '%b\n' "$FAKE_TMUX_PANES" ;;
+  show-environment) [ -n "$FAKE_TMUX_SESSENV" ] && printf '%s\n' "$FAKE_TMUX_SESSENV" || { echo "unknown variable: HB_CLAUDE_PANE" >&2; exit 1; } ;;
   display-message) printf '%s\n' "${FAKE_TMUX_SESSION:-}" ;;
   send-keys)    [ "$FAKE_TMUX_SEND_FAIL" = 1 ] && { echo "can't find pane" >&2; exit 1; }
                 # a stand-in pane: $FAKE_PANE_FILE collects what a Claude input box would hold (Enter shows as <ENTER>)

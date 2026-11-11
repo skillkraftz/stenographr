@@ -179,7 +179,7 @@ class LiveSession:
         return " ".join(self.result.texts) if self.result else ""
 
     # -- the user's choice
-    def deliver(self, choice: str, claude_session: str | None = None) -> str:
+    def deliver(self, choice: str, claude_session: str | None = None, pane: str | None = None) -> str:
         """choice: copy | append | send | new | close. Writes the end line and returns it ('ok · copied',
         'ok · appended to claude alpha', 'ok · sent to claude alpha', 'ok · new take', 'ok · closed', 'FAILED: ...').
         Copy and append add one trailing space (so the next take, or typing, starts clean); send presses Enter."""
@@ -195,7 +195,7 @@ class LiveSession:
                 problem = "clipboard failed"
         elif choice in ("append", "send") and text:
             try:
-                tmuxsend.send(tmuxsend.claude_panes()[claude_session], text, enter=(choice == "send"))
+                tmuxsend.send(pane or tmuxsend.claude_panes()[claude_session], text, enter=(choice == "send"))
                 how = f"{'sent' if choice == 'send' else 'appended'} to claude {claude_session}"
             except Exception as e:                 # noqa: BLE001
                 self.log.error(NAME, f"{choice} to claude {claude_session} failed: {type(e).__name__}: {e}")

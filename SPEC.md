@@ -203,12 +203,17 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
     Only Acceptable to use. when the work will grow." becomes one sentence). About 0.03 x realtime on CPU or GPU; a 30 s
     chunk needs ~1.2 GB of VRAM at most, and the GPU->CPU fallback applies as everywhere. If delivery fails the text
     stays on screen and the end line says FAILED.
-  - **Claude: append and send** (changed 2026-11-10; two buttons, replacing "Send to Claude"). The target is the pane whose
-    `pane_current_command` is `claude` (found with `tmux list-panes -a`, no hyperbeam code). If exactly one tmux client is
-    attached and its session has a Claude pane, that session is the target and its name is shown at the right end of the
-    blue "Live preview" bar (a loop shows its own tmux session there when the target is not known yet). If several clients are
-    attached, or the attached session has none but others do, either button opens a short list of the sessions that have one.
-    With no Claude pane anywhere both buttons are disabled. The labels are just "Claude append (a)" and "Claude send (e)".
+  - **Claude: append and send** (two buttons, replacing "Send to Claude"). The target is hyperbeam's Claude pane, found in
+    this order (`tmuxsend.choose_target`, plain `tmux`, no hyperbeam code):
+    1. `HB_CLAUDE_PANE` (a pane id like `%12`, set by hyperbeam in every project session) in our own environment;
+    2. else, inside tmux (`$TMUX_PANE` set): the session our pane is in (`tmux display-message -p -t $TMUX_PANE '#{session_name}'`),
+       then `tmux show-environment -t <session> HB_CLAUDE_PANE`.
+    If an id comes out and that pane exists, Append/Send go there with no question, and that pane's session name is shown at
+    the right end of the blue "Live preview" bar (a loop shows its own tmux session there until a target is known). If the id is
+    set but the pane is gone, the status line says "hyperbeam's Claude pane not found" and the buttons open a short list of the
+    sessions whose pane runs `claude` (`pane_current_command`). Not in hyperbeam (no variable anywhere, e.g. the kitty popup):
+    that list, as before. With no target and no Claude pane anywhere both buttons are disabled. The old guess from the
+    attached tmux client's session is gone. The labels are just "Claude append (a)" and "Claude send (e)".
     - **Append (a):** `tmux send-keys -t <pane> -l -- "<clean text, one line> "`: the text plus ONE trailing space, no Enter.
       Whatever is already in Claude's input stays, so several takes can be appended one after another.
     - **Send (e):** the same `send-keys -l` with the text (no trailing space), then `tmux send-keys -t <pane> Enter` (as hyperbeam's
