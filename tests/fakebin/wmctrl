@@ -1,0 +1,3 @@
+#!/bin/sh
+# Fake wmctrl: logs its arguments ("arg|arg|...") to $FAKE_WMCTRL_LOG and succeeds.
+printf '%s|' "$@" >> "${FAKE_WMCTRL_LOG:-/dev/null}"; echo >> "${FAKE_WMCTRL_LOG:-/dev/null}"

@@ -192,10 +192,11 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
     other instance (it stops, shows its own clean text and buttons, and stays open: it is never closed or killed),
     waits until it has let go of the microphone, then records here. Cancel: a popup closes, a loop goes back to Ready.
   - **Ctrl+` (`stenographr live --toggle`) only ever looks at popups.** A popup is recording -> it is stopped
-    (SIGUSR1). A popup exists in any other state (notice, cleaning, buttons) -> nothing. No popup (and none was
+    (SIGUSR1). A popup exists in any other state (notice, cleaning, buttons) -> it is raised and focused (`wmctrl -a "stenographr live"`). No popup (and none was
     launched in the last 10 s) -> kitty opens a window, 80x25, titled "stenographr live" (`-o initial_window_width=80c
-    -o initial_window_height=25c -o remember_window_size=no`), running `stenographr live --popup`. Loop instances,
-    ready or recording, are never signalled. Always-on-top is not possible here (see below).
+    -o initial_window_height=25c -o remember_window_size=no -o linux_display_server=x11`: the popup only runs under XWayland), running
+    `stenographr live --popup`, and a detached `wmctrl -r "stenographr live" -b add,above` (retried for ~10 s until the window
+    exists) keeps it on top. Loop instances, ready or recording, are never signalled. Needs `wmctrl`.
   - After "Cleaning up…": the session's 16 kHz audio is kept in memory while recording (the same samples the audio file
     got) and decoded once at the end by `engine.transcribe_long` (the **clean pass**): Silero VAD with 0.3 s pauses and a
     30 s cap, neighbouring segments merged into chunks of up to ~30 s and cut only at the longest pauses, each chunk
@@ -233,9 +234,11 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
     instance, repeated signals and tmux panes, and the log now records where a clean-pass failure happened.)
   - Verified 2026-11-10: kitty `-o linux_display_server=x11 -o remember_window_size=no -o initial_window_width=80c
     -o initial_window_height=25c` gives exactly 25 rows x 80 columns; when that window closed, X focus went back to
-    the previously active window. Always on top: GNOME/Wayland has no API for it; for an XWayland window it would take
-    sending `_NET_WM_STATE_ABOVE` with `wmctrl` or `xdotool`, which are not installed (needs an apt package), so it is
-    not done: the window opens focused instead.
+    the previously active window. Always on top: GNOME/Wayland has no API, so the popup (only) runs under XWayland and `wmctrl` (installed 2026-11-11) sets
+    `_NET_WM_STATE_ABOVE` and raises it. Not verified in a real window from the assistant's shell (a guard blocks GUI apps there).
+  - **Copy (wl-copy)** is `clipboard.copy`, shared by live and recall: stdin is the only pipe, stdout/stderr go to /dev/null, and wl-copy
+    starts in its own session. wl-copy leaves a background process that serves the clipboard; with captured or inherited pipes the
+    caller waits for it, and in the popup's process group it dies when the window closes (clipboard empties).
 - **Notes mode**, `stenographr notes` (aliasable to `steno`): runs in the terminal until Ctrl+C. Text
   appears sentence by sentence as I pause (Silero VAD fed live, 0.6 s of silence ends a sentence); each
   sentence is appended at once to the notes file and to the daily file (timestamped there; the terminal
