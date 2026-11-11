@@ -20,6 +20,7 @@ import signal
 import subprocess
 import sys
 import threading
+import traceback
 from pathlib import Path
 
 from . import daily, tmuxsend
@@ -138,7 +139,8 @@ class LiveSession:
                                        method="transcribe_long")
         except Exception as e:                     # noqa: BLE001
             self.clean_failed = True
-            self.log.error(NAME, f"clean pass failed: {type(e).__name__}: {e}")
+            tb = traceback.extract_tb(e.__traceback__)[-1]
+            self.log.error(NAME, f"clean pass failed: {type(e).__name__}: {e} (at {Path(tb.filename).name}:{tb.lineno})")
             raise
         lines = [(r.t0 + dt.timedelta(seconds=s["start"]), s["text"].strip()) for s in segs if s["text"].strip()]
         if not lines:                              # the pass found nothing: keep what was said live
@@ -247,6 +249,8 @@ def run(cfg, log: Log, requested: str, headless: bool = False) -> int:
     try:
         app.run(headless=headless)
     finally:
+        for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):    # a second hang-up must not cut the wrap-up short
+            signal.signal(sig, signal.SIG_IGN)
         try:
             session.finalize_on_exit()
         finally:

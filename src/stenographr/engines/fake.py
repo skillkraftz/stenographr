@@ -41,6 +41,7 @@ class FakeEngine:
         FAKE_ENGINE_CLEAN_FAIL=1: raise (to test the failure path)."""
         if os.environ.get("FAKE_ENGINE_CLEAN_FAIL") == "1":
             raise RuntimeError("fake clean-pass failure")
+        time.sleep(float(os.environ.get("FAKE_ENGINE_CLEAN_DELAY", "0")))        # a slow clean pass
         step = float(os.environ.get("FAKE_ENGINE_CLEAN_SECONDS", "15"))
         words = os.environ.get("FAKE_ENGINE_CLEAN_TEXT", "Clean sentence one.|Clean sentence two.").split("|")
         total = len(audio) / SR
