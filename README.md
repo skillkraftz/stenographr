@@ -65,7 +65,7 @@ Samsung file name (`YYYYMMDD_HHMMSS`, any suffix), else `--recorded-at`, else th
 
 ## Dictation
 
-Needs `pw-record`, `ffmpeg` (libopus), `wl-copy`, `kitty` (for the shortcut), `tmux` (only for Send to Claude); records from the PipeWire node `scarlett-mic`
+Needs `pw-record`, `ffmpeg` (libopus), `wl-copy`, `kitty` (for the shortcut), `tmux` (only for the Claude buttons); records from the PipeWire node `scarlett-mic`
 (see the audio section below), channel 1. Suggested aliases:
 
 ```sh
@@ -77,17 +77,19 @@ alias recall='stenographr recall'
   appends it to the daily file), and when you stop it re-transcribes the whole session in one pass to get whole
   sentences. Two kinds of instance, and several can be open at once:
   - **Loop** (`stenographr live` in a terminal or tmux pane): opens on **Ready** (mic closed). **Start** (Enter or `r`) ->
-    recording -> **Stop** (`s`) -> clean text with **Copy (y)** (clipboard, back to Ready), **Send to Claude · session (c)**
-    (types it as one line into that tmux session's Claude Code input, never presses Enter; back to Ready), **New (r)**
+    recording -> **Stop** (`s`) -> clean text with **Copy (y)** (clipboard plus a trailing space, back to Ready), **Claude append (a)**
+    (types the text plus a space into that tmux session's Claude Code input, no Enter, so you can append several takes) and
+    **Claude send (e)** (types the text and presses Enter: submits everything in the input; the only Enter stenographr ever sends);
+    both back to Ready. The session's name is at the right end of the blue bar. **New (r)**
     (nothing delivered, back to Ready) and **Close (q / Esc)**. Ready shows "Last: sent to claude alpha · 22:14". The model
     loads once per app. Each capture is its own session block and audio file.
   - **Popup** (opened by Ctrl+`, which runs `stenographr live --toggle`): a kitty window, 80x25, that records at once;
-    Stop gives **Copy**, **Send to Claude** and **Close**, then the window closes. Ctrl+` while a popup is recording stops
+    Stop gives **Copy**, **Claude append**, **Claude send** and **Close**, then the window closes. Ctrl+` while a popup is recording stops
     it; otherwise it does nothing while a popup is open; it never touches loop instances.
   - **One recording at a time:** starting while another instance records shows "Recording in <where>. Stop it and record
     here?" (**Stop it and record here** / **Cancel**). Stop it makes the other instance stop and show its own clean text;
     it stays open.
-  Closing a window any other way stops it without delivering; the live lines and the audio are already saved.
+  The buttons and text reflow with the pane size (a tall narrow sidebar works). Closing a window any other way stops it without delivering; the live lines and the audio are already saved.
 - `stenographr notes` (`steno`): live in the terminal until Ctrl+C. Each sentence is printed, and appended at once
   to the notes file and to the daily file. Inside a git repo the notes file is `<repo root>/steno/steno-YYYY-MM-DD.txt`
   (and `steno/` is added to the repo's `.gitignore` if git isn't ignoring it yet); elsewhere it is

@@ -97,7 +97,7 @@ end: 2026-11-10 20:07:30 · 1m30s · ok · copied
 - **`live` blocks (changed 2026-11-10):** the live phrases are appended as they are recognised (so a crash
   keeps everything said); `clean:` and the clean lines are appended when the session has been
   re-transcribed in one pass; the end line carries what was done with the clean text: `ok · copied`,
-  `ok · sent to claude <session>`, `ok · new take`, `ok · closed`, `ok · not copied (window closed)` (the window
+  `ok · appended to claude <session>`, `ok · sent to claude <session>`, `ok · new take`, `ok · closed`, `ok · not copied (window closed)` (the window
   went away), or `FAILED: ...`
   (`clipboard failed`, `send to claude failed`, `clean pass failed`). If the clean pass failed but a choice was
   made, the live text is what was delivered and the end line says so. A session killed hard has the start line,
@@ -169,12 +169,12 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
   timestamped, to the daily file as it goes. Mode `live`, target `unknown`. Several instances can be open at once
   (changed 2026-11-10: one per tmux pane is expected); there are two kinds.
   - **Popup** (`stenographr live --popup`; opened by Ctrl+`): a kitty window, 80x25. Starts recording at once. Stop
-    (`s` or the button) -> "Cleaning up…" -> the clean text with **Copy (y)**, **Send to Claude · <session> (c)**,
+    (`s` or the button) -> "Cleaning up…" -> the clean text with **Copy (y)**, **Claude append (a)**, **Claude send (e)**,
     **Close (q / Esc)**. Any choice writes the clean block and end line, then exits (the window closes).
   - **Loop** (`stenographr live` started any other way, in a terminal or tmux pane; driven only by clicking, the
     hotkey never touches it): opens on **Ready** (buttons **Start** (Enter or `r`) and **Close** (`q`); the
     microphone is not open, so GNOME's mic icon is off). Start -> recording -> Stop -> cleaning up -> the clean text
-    with **Copy (y)** (wl-copy, back to Ready), **Send to Claude · <session> (c)** (back to Ready), **New (r)**
+    with **Copy (y)** (wl-copy, back to Ready), **Claude append (a)** and **Claude send (e)** (back to Ready), **New (r)**
     (delivers nothing, back to Ready), **Close (q / Esc)** (delivers nothing, quits). The Ready screen shows the
     last action and its time ("Last: sent to claude alpha · 22:14"). Every capture is its own session block with
     its own audio file.
@@ -203,11 +203,23 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
     Only Acceptable to use. when the work will grow." becomes one sentence). About 0.03 x realtime on CPU or GPU; a 30 s
     chunk needs ~1.2 GB of VRAM at most, and the GPU->CPU fallback applies as everywhere. If delivery fails the text
     stays on screen and the end line says FAILED.
-  - **Claude target:** the pane whose `pane_current_command` is `claude` (found with `tmux list-panes -a`, no
-    hyperbeam code). If exactly one tmux client is attached and its session has a Claude pane, that session is the
-    target. If several clients are attached, or the attached session has none but others do, the button opens a
-    short list of the sessions that have one. With none, the button is disabled. Text goes in with
-    `tmux send-keys -t <pane> -l -- <one line>`, which appends to the input without submitting.
+  - **Claude: append and send** (changed 2026-11-10; two buttons, replacing "Send to Claude"). The target is the pane whose
+    `pane_current_command` is `claude` (found with `tmux list-panes -a`, no hyperbeam code). If exactly one tmux client is
+    attached and its session has a Claude pane, that session is the target and its name is shown at the right end of the
+    blue "Live preview" bar (a loop shows its own tmux session there when the target is not known yet). If several clients are
+    attached, or the attached session has none but others do, either button opens a short list of the sessions that have one.
+    With no Claude pane anywhere both buttons are disabled. The labels are just "Claude append (a)" and "Claude send (e)".
+    - **Append (a):** `tmux send-keys -t <pane> -l -- "<clean text, one line> "`: the text plus ONE trailing space, no Enter.
+      Whatever is already in Claude's input stays, so several takes can be appended one after another.
+    - **Send (e):** the same `send-keys -l` with the text (no trailing space), then `tmux send-keys -t <pane> Enter` (as hyperbeam's
+      `send_line` does): everything now in Claude's input, earlier appends included, is submitted. This is the ONLY place stenographr
+      ever presses Enter (rule relaxed 2026-11-10 for this button only).
+    - Not `s` (it is Stop on the recording screen; a double tap must never submit), and Enter stays disabled at the button step.
+  - **Copy (y)** also adds one trailing space, so a second take, or typing, continues cleanly.
+  - **Layout adapts to the terminal** (changed 2026-11-10; it runs in tmux split panes, sometimes a tall narrow sidebar): the
+    buttons form a grid with as many columns as fit (a label needs ~26 cells; one column in a narrow pane, one-line buttons
+    below 40 columns), and the banner, status, "Last:" line and clean text wrap and reflow when the pane is resized. Every
+    button keeps its whole label from 28 columns up (tested at 28x40, 36x30, 60x25, 80x25 and 120x20).
   - **Window closed any other way** (X button = SIGHUP, kill = SIGTERM): recording stops, the clean pass runs if it
     can, the end line says `ok · not copied (window closed)` (or `FAILED: clean pass failed`); nothing is
     delivered. A second hang-up during this wrap-up is ignored. SIGKILL leaves the live lines and audio, no end line.

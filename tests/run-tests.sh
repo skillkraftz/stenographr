@@ -327,7 +327,7 @@ check "phrases are shown as recognised and already appended to the daily file (b
 check "the clean pass ran on the whole saved audio (15 s = 3 x 5 s at 16 kHz), not on the phrases" 'grep -qx "CLEAN: Clean 15 seconds. Second sentence." "$W/core.out"'
 T0=$(sed -n 1p "$DAILY" | grep -oE "[0-9]{2}:[0-9]{2}:[0-9]{2} ·" | cut -d" " -f1)
 check "daily block: start (live · unknown · audio), 3 timestamped live lines, clean: + timestamped clean lines, end ok · copied" '[[ $(sed -n 1p "$DAILY") =~ ^start:\ $BLK\ ·\ live\ ·\ unknown\ ·\ audio/[0-9-]+-live\.opus$ ]] && sed -n 2p "$DAILY" | grep -qx "\[$T0\] one" && sed -n 4p "$DAILY" | grep -qx "\[$(plus $T0 10)\] three" && sed -n 5p "$DAILY" | grep -qx "clean:" && sed -n 6p "$DAILY" | grep -qE "^$TS Clean 15 seconds\." && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok · copied$"'
-check "Copy: wl-copy got the clean text (no timestamps)" '[[ $(cat "$W/clip") == "Clean 15 seconds. Second sentence." ]]'
+check "Copy: wl-copy got the clean text (no timestamps) plus ONE trailing space" '[[ $(cat "$W/clip") == "Clean 15 seconds. Second sentence. " ]]'
 check "STATUS printed is the end line status" 'grep -qx "STATUS: ok · copied" "$W/core.out"'
 ST=$(sed -n 1p "$DAILY" | grep -oE "^start: [0-9-]+ [0-9:]+" | cut -d" " -f2-); AF=$(date -d "$ST" +%Y-%m-%d-%H%M%S)-live.opus
 check "audio: exactly one file named session start + mode (live), pointed to by the start line" '[[ $(ls "$A/audio" | wc -l) == 1 && -s $A/audio/$AF ]] && sed -n 1p "$DAILY" | grep -qE " · live · unknown · audio/$AF$"'
@@ -357,14 +357,17 @@ from stenographr import tmuxsend
 default, panes = tmuxsend.choose_target()
 print("TARGET:", default, sorted(panes))
 s = start(); wait(lambda: s.phrases == ["one"]); go(2); go(3); wait(lambda: len(s.phrases) == 3); s.request_stop(); s.record_thread.join(10); s.clean()
-print("STATUS:", s.deliver("claude", default))
+print("STATUS:", s.deliver("send", default))
 ' > "$W/core.out" 2>&1
 check "one attached client whose session has a claude pane: that session is the target" 'grep -qx "TARGET: alpha \[.alpha., .beta.\]" "$W/core.out"'
-check "exactly one send-keys -l call, to the claude pane of alpha (%0), with the clean text on ONE line" '[[ $(grep -c "^send-keys|" "$W/tmux.log") == 1 ]] && grep -qxF "send-keys|-t|%0|-l|--|Clean 15 seconds. Second sentence.|" "$W/tmux.log"'
-check "Enter is never sent (no Enter/C-m in any tmux call)" '! grep -qiE "enter|C-m|\|\\\\r" "$W/tmux.log"'
+check "Send: the text on ONE line (no trailing space) in one send-keys -l call to alpha's pane (%0), then exactly one Enter key, in that order" '[[ $(grep -c "^send-keys|" "$W/tmux.log") == 2 ]] && [[ $(grep "^send-keys|" "$W/tmux.log" | sed -n 1p) == "send-keys|-t|%0|-l|--|Clean 15 seconds. Second sentence.|" && $(grep "^send-keys|" "$W/tmux.log" | sed -n 2p) == "send-keys|-t|%0|Enter|" ]]'
 check "end line: sent to claude alpha; nothing on the clipboard" '[[ ! -e $W/clip ]] && grep -qx "STATUS: ok · sent to claude alpha" "$W/core.out" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok · sent to claude alpha$"'
+dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
+runcore 's = start(); wait(lambda: s.phrases == ["one"]); go(2); go(3); wait(lambda: len(s.phrases) == 3); s.request_stop(); s.record_thread.join(10); s.clean(); print("STATUS:", s.deliver("append", "alpha"))' > "$W/core.out" 2>&1
+check "Append: the text plus ONE trailing space in one send-keys -l call, and NO Enter" '[[ $(grep -c "^send-keys|" "$W/tmux.log") == 1 ]] && grep -qxF "send-keys|-t|%0|-l|--|Clean 15 seconds. Second sentence. |" "$W/tmux.log" && ! grep -qi "enter" "$W/tmux.log"'
+check "end line: appended to claude alpha" 'grep -qx "STATUS: ok · appended to claude alpha" "$W/core.out" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok · appended to claude alpha$"'
 dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_SEND_FAIL=1 FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude'
-runcore 's = start(); wait(lambda: s.phrases == ["one"]); s.request_stop(); s.record_thread.join(10); s.clean(); print("STATUS:", s.deliver("claude", "alpha"))' > "$W/core.out" 2>&1
+runcore 's = start(); wait(lambda: s.phrases == ["one"]); s.request_stop(); s.record_thread.join(10); s.clean(); print("STATUS:", s.deliver("send", "alpha"))' > "$W/core.out" 2>&1
 check "tmux send fails: end line FAILED: send to claude failed, logged" 'grep -qx "STATUS: FAILED: send to claude failed, see steno.log" "$W/core.out" && grep -q "ERROR live send to claude alpha failed" "$LOG"'
 unset FAKE_TMUX_SEND_FAIL
 dfresh; export FAKE_TMUX_CLIENTS="alpha\nbeta" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
@@ -386,6 +389,9 @@ async def until(pilot, cond, secs=8):
         if cond(): return
         await pilot.pause(0.05)
     raise SystemExit("timeout")
+async def click(pilot, sel):
+    await pilot.pause(0.25)                       # let the button grid settle before clicking
+    await pilot.click(sel)
 def labels(app): return {b.id: (str(b.label), b.disabled, b.display) for b in app.screen.query("Button")}
 def logtext(app): return [("".join(s.text for s in l)).strip() for l in app.query_one("RichLog").lines]
 '
@@ -397,20 +403,21 @@ async def main():
     app = LiveApp(cfg, log, "cpu", popup=True)
     async with app.run_test(size=(80, 25)) as pilot:
         await until(pilot, lambda: logtext(app) == ["one"])
-        print("BANNER:", app.screen.query_one("#banner").content if hasattr(app.screen.query_one("#banner"), "content") else "?")
+        print("BANNER:", app.screen.query_one("#banner_l").content)
         print("RECORDING:", logtext(app), {k: v[2] for k, v in labels(app).items()})
         go(2); go(3); await until(pilot, lambda: len(logtext(app)) == 3)
-        await pilot.click("#stop")
+        await click(pilot, "#stop")
         await until(pilot, lambda: app.phase == "review")
         print("REVIEW:", logtext(app), labels(app))
-        await pilot.click("#claude")
+        print("BANNER-R:", app.screen.query_one("#banner_r").content)
+        await click(pilot, "#send")
         await pilot.pause(0.3)
     print("EXITED")
 asyncio.run(main())
 ' > "$W/ui.out" 2>&1
-check "screen: banner text, each phrase shown as recognised, only Stop visible while recording" 'grep -q "^BANNER: Live preview · final text is cleaned up when you stop" "$W/ui.out" && grep -q "^RECORDING: \[.one.\] {.start.: False, .stop.: True, .copy.: False, .claude.: False, .new.: False, .close.: False, .stopit.: False, .cancel.: False}" "$W/ui.out"'
-check "popup, after Stop: the clean text and exactly Copy, Send to Claude · alpha, Close (no New)" 'grep -q "^REVIEW: \[.Clean 15 seconds..\]" "$W/ui.out" && grep -qF "Send to Claude · alpha (c)" "$W/ui.out" && grep -qF "Close (q / Esc)" "$W/ui.out" && ! grep -q "Don.t copy" "$W/ui.out" && grep -q ".new.: (.New (r)., False, False)" "$W/ui.out"'
-check "clicking Send to Claude: one send-keys -l to %0, the window then exits, end line sent to claude alpha" 'grep -q "^EXITED" "$W/ui.out" && [[ $(grep -c "^send-keys|" "$W/tmux.log") == 1 ]] && grep -qxF "send-keys|-t|%0|-l|--|Clean 15 seconds.|" "$W/tmux.log" && tail -1 "$DAILY" | grep -qE "· ok · sent to claude alpha$"'
+check "screen: banner text, each phrase shown as recognised, only Stop visible while recording" 'grep -q "^BANNER: Live preview · final text is cleaned up when you stop" "$W/ui.out" && grep -q "^RECORDING: \[.one.\] {.start.: False, .stop.: True, .copy.: False, .append.: False, .send.: False, .new.: False, .close.: False, .stopit.: False, .cancel.: False}" "$W/ui.out"'
+check "popup, after Stop: the clean text and exactly Copy, Claude append (a), Claude send (e), Close (no New); the project name is at the right end of the bar" 'grep -q "^REVIEW: \[.Clean 15 seconds..\]" "$W/ui.out" && grep -q ".append.: (.Claude append (a)., False, True)" "$W/ui.out" && grep -q ".send.: (.Claude send (e)., False, True)" "$W/ui.out" && grep -qF "Close (q / Esc)" "$W/ui.out" && grep -q ".new.: (.New (r)., False, False)" "$W/ui.out" && grep -qx "BANNER-R: alpha" "$W/ui.out"'
+check "clicking Claude send: the text typed to %0, then one Enter; the window exits; end line sent to claude alpha" 'grep -q "^EXITED" "$W/ui.out" && [[ $(grep -c "^send-keys|" "$W/tmux.log") == 2 ]] && grep -qxF "send-keys|-t|%0|-l|--|Clean 15 seconds.|" "$W/tmux.log" && grep -qxF "send-keys|-t|%0|Enter|" "$W/tmux.log" && tail -1 "$DAILY" | grep -qE "· ok · sent to claude alpha$"'
 dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tbash'
 runui '
 async def main():
@@ -418,29 +425,29 @@ async def main():
     async with app.run_test(size=(80, 25)) as pilot:
         await until(pilot, lambda: logtext(app) == ["one"]); go(2); go(3); await until(pilot, lambda: len(logtext(app)) == 3)
         await pilot.press("s"); await until(pilot, lambda: app.phase == "review")
-        print("CLAUDE:", labels(app)["claude"])
-        await pilot.press("c"); await pilot.pause(0.2); print("PHASE-AFTER-C:", app.phase)
+        print("CLAUDE:", labels(app)["append"], labels(app)["send"])
+        await pilot.press("a"); await pilot.press("e"); await pilot.pause(0.2); print("PHASE-AFTER-AE:", app.phase)
         await pilot.press("y"); await pilot.pause(0.3)
     print("EXITED")
 asyncio.run(main())
 ' > "$W/ui.out" 2>&1
-check "no claude pane: the Send to Claude button is disabled (and its key does nothing)" 'grep -q "^CLAUDE: (.Send to Claude (no claude pane)., True, True)" "$W/ui.out" && grep -q "^PHASE-AFTER-C: review" "$W/ui.out" && ! grep -q "^send-keys" "$W/tmux.log" 2>/dev/null'
-check "the keys work too: s stops, y copies the clean text" 'grep -q "^EXITED" "$W/ui.out" && [[ $(cat "$W/clip") == "Clean 15 seconds." ]] && tail -1 "$DAILY" | grep -qE "· ok · copied$"'
+check "no claude pane: both Claude buttons are disabled (and their keys do nothing)" 'grep -q "^CLAUDE: (.Claude append (a)., True, True) (.Claude send (e)., True, True)" "$W/ui.out" && grep -q "^PHASE-AFTER-AE: review" "$W/ui.out" && ! grep -q "^send-keys" "$W/tmux.log" 2>/dev/null'
+check "the keys work too: s stops, y copies the clean text" 'grep -q "^EXITED" "$W/ui.out" && [[ $(cat "$W/clip") == "Clean 15 seconds. " ]] && tail -1 "$DAILY" | grep -qE "· ok · copied$"'
 dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha\nbeta" FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
 runui '
 async def main():
     app = LiveApp(cfg, log, "cpu", popup=True)
     async with app.run_test(size=(80, 25)) as pilot:
         await until(pilot, lambda: logtext(app) == ["one"]); go(2); go(3); await until(pilot, lambda: len(logtext(app)) == 3)
-        await pilot.click("#stop"); await until(pilot, lambda: app.phase == "review")
-        print("CLAUDE:", labels(app)["claude"][0])
-        await pilot.click("#claude"); await pilot.pause(0.3)
+        await click(pilot, "#stop"); await until(pilot, lambda: app.phase == "review")
+        print("CLAUDE:", labels(app)["append"][0])
+        await click(pilot, "#append"); await pilot.pause(0.3)
         print("PICKER:", type(app.screen).__name__, [str(o.prompt) for o in app.screen.query_one("OptionList").options])
         await pilot.press("down"); await pilot.press("enter"); await pilot.pause(0.4)
     print("EXITED")
 asyncio.run(main())
 ' > "$W/ui.out" 2>&1
-check "ambiguous (two clients): the button opens a list of sessions with a claude pane; picking one sends there" 'grep -q "^CLAUDE: Send to Claude… (c)" "$W/ui.out" && grep -q "^PICKER: PickSession \[.alpha., .beta.\]" "$W/ui.out" && grep -q "^EXITED" "$W/ui.out" && grep -qxF "send-keys|-t|%2|-l|--|Clean 15 seconds.|" "$W/tmux.log" && tail -1 "$DAILY" | grep -qE "· ok · sent to claude beta$"'
+check "ambiguous (two clients): Claude append opens a list of sessions with a claude pane; picking beta appends there (text + space, no Enter)" 'grep -q "^CLAUDE: Claude append (a)" "$W/ui.out" && grep -q "^PICKER: PickSession \[.alpha., .beta.\]" "$W/ui.out" && grep -q "^EXITED" "$W/ui.out" && grep -qxF "send-keys|-t|%2|-l|--|Clean 15 seconds. |" "$W/tmux.log" && ! grep -qi "enter" "$W/tmux.log" && tail -1 "$DAILY" | grep -qE "· ok · appended to claude beta$"'
 
 echo "== live loop (pane / terminal instance)"
 UPRE2='
@@ -460,13 +467,13 @@ async def main():
         go(2); go(3)
         await pilot.press("r"); await until(pilot, lambda: len(logtext(app)) == 3)
         print("RECORDING:", shown(app), "| mic opened:", os.path.exists(W + "/pw.log"))
-        await pilot.click("#stop"); await until(pilot, lambda: app.phase == "review")
-        print("REVIEW:", shown(app), "|", labels(app)["claude"][0])
+        await click(pilot, "#stop"); await until(pilot, lambda: app.phase == "review")
+        print("REVIEW:", shown(app), "|", labels(app)["append"][0], "|", labels(app)["send"][0], "|", app.screen.query_one("#banner_r").content)
         await pilot.press("y"); await until(pilot, lambda: app.phase == "ready")
         print("AFTER-COPY:", status(app), "|", last(app))
         await pilot.press("enter"); await until(pilot, lambda: len(logtext(app)) == 3)
         await pilot.press("s"); await until(pilot, lambda: app.phase == "review")
-        await pilot.click("#claude"); await until(pilot, lambda: app.phase == "ready")
+        await click(pilot, "#send"); await until(pilot, lambda: app.phase == "ready")
         print("AFTER-SEND:", status(app), "|", last(app))
         await pilot.press("q"); await pilot.pause(0.3)
     print("EXITED")
@@ -474,9 +481,9 @@ asyncio.run(main())
 ' > "$W/ui.out" 2>&1
 check "loop starts on Ready, mic closed (no recorder), buttons Start and Close, nothing in the last line" 'grep -q "^READY: Ready \[.start., .close.\] | last: .. | mic opened: False" "$W/ui.out"'
 check "Start (r) records: only Stop shown, the recorder is opened now" 'grep -q "^RECORDING: \[.stop.\] | mic opened: True" "$W/ui.out"'
-check "button step (loop): Copy, Send to Claude · alpha, New, Close" 'grep -q "^REVIEW: \[.copy., .claude., .new., .close.\] | Send to Claude · alpha (c)" "$W/ui.out"'
+check "button step (loop): Copy, Claude append (a), Claude send (e), New, Close; project name on the bar" 'grep -q "^REVIEW: \[.copy., .append., .send., .new., .close.\] | Claude append (a) | Claude send (e) | alpha" "$W/ui.out"'
 check "after Copy: back on Ready with 'Last: copied · HH:MM'; after Send: 'Last: sent to claude alpha · HH:MM'" 'grep -qE "^AFTER-COPY: Ready \| Last: copied · [0-9]{2}:[0-9]{2}$" "$W/ui.out" && grep -qE "^AFTER-SEND: Ready \| Last: sent to claude alpha · [0-9]{2}:[0-9]{2}$" "$W/ui.out" && grep -q "^EXITED" "$W/ui.out"'
-check "two captures: two session blocks (end words copied / sent to claude alpha), two audio files, one send-keys call, the clipboard has the clean text" '[[ $(grep -c "^start:" "$DAILY") == 2 && $(ls "$A/audio" | wc -l) == 2 ]] && grep -qE "· ok · copied$" "$DAILY" && grep -qE "· ok · sent to claude alpha$" "$DAILY" && [[ $(grep -c "^send-keys|" "$W/tmux.log") == 1 && $(cat "$W/clip") == "Clean 15 seconds." ]]'
+check "two captures: two session blocks (end words copied / sent to claude alpha), two audio files, the typed text + one Enter, the clipboard has the clean text plus a space" '[[ $(grep -c "^start:" "$DAILY") == 2 && $(ls "$A/audio" | wc -l) == 2 ]] && grep -qE "· ok · copied$" "$DAILY" && grep -qE "· ok · sent to claude alpha$" "$DAILY" && [[ $(grep -c "^send-keys|" "$W/tmux.log") == 2 && $(cat "$W/clip") == "Clean 15 seconds. " ]]'
 check "the model was constructed ONCE for the whole app (two captures)" '[[ $(grep -c . "$W/count") == 1 ]] && [[ $(grep -c "engine loaded" "$LOG") == 1 ]]'
 check "no 'no running event loop' anywhere in the log (a capture ending and another beginning)" '! grep -q "no running event loop" "$LOG" && ! grep -q "ERROR" "$LOG"'
 dfresh; mkdir -p "$W/gate"; : > "$W/count"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude'
@@ -531,6 +538,61 @@ asyncio.run(main())
 ' > "$W/ui.out" 2>&1
 check "a stale 'recording' entry does not block Start: no notice, records, the entry is cleaned" 'grep -q "^STALE-IGNORED: recording" "$W/ui.out" && [[ ! -e $REG/999997.json ]]'
 
+dfresh; mkdir -p "$W/gate"; : > "$W/count"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude' FAKE_PANE_FILE=$W/pane
+printf 'take1\ntake2\ntake3\n' > "$W/seq"; rm -f "$W/pane"
+FAKE_ENGINE_CLEAN_SEQ=$W/seq runui2 '
+async def take(pilot, app):
+    await pilot.press("r"); await until(pilot, lambda: len(logtext(app)) == 3)
+    await pilot.press("s"); await until(pilot, lambda: app.phase == "review")
+async def main():
+    app = LiveApp(cfg, log, "cpu")
+    async with app.run_test(size=(80, 25)) as pilot:
+        await until(pilot, lambda: app.phase == "ready"); go(2); go(3)
+        await take(pilot, app)
+        await pilot.press("s"); await pilot.press("enter"); await pilot.pause(0.3)          # neither may deliver anything
+        print("S-AND-ENTER:", app.phase, "| pane so far:", repr(open(W + "/pane").read() if os.path.exists(W + "/pane") else ""))
+        await pilot.press("a"); await until(pilot, lambda: app.phase == "ready")
+        await take(pilot, app); await pilot.press("a"); await until(pilot, lambda: app.phase == "ready")
+        await take(pilot, app); await pilot.press("e"); await until(pilot, lambda: app.phase == "ready")
+        print("PANE:", repr(open(W + "/pane").read())); await pilot.press("q"); await pilot.pause(0.3)
+asyncio.run(main())
+' > "$W/ui.out" 2>&1
+check "at the button step s and Enter do nothing (no delivery, still at the buttons)" 'grep -q "^S-AND-ENTER: review | pane so far: ..$" "$W/ui.out"'
+check "Append, Append, Send: the stand-in pane gets 'take1 take2 take3' and exactly one Enter, at the very end" 'grep -qxF "PANE: '"'"'take1 take2 take3<ENTER>'"'"'" "$W/ui.out" && [[ $(grep -c "|Enter|" "$W/tmux.log") == 1 && $(grep -c "^send-keys|" "$W/tmux.log") == 4 ]]'
+check "end words: appended to claude alpha (x2), then sent to claude alpha; three blocks" '[[ $(grep -c "^start:" "$DAILY") == 3 && $(grep -c "· ok · appended to claude alpha$" "$DAILY") == 2 && $(grep -c "· ok · sent to claude alpha$" "$DAILY") == 1 ]]'
+unset FAKE_PANE_FILE
+
+echo "== live screen adapts to the terminal size (tall sidebar ... wide pane)"
+dfresh; mkdir -p "$W/gate"; : > "$W/count"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude'
+runui2 '
+def misfit(app, w, h):
+    bad = []
+    for b in app.screen.query("Button"):
+        if not b.display: continue
+        r = b.region
+        if r.x < 0 or r.right > w or r.bottom > h or r.width < len(str(b.label)): bad.append((b.id, str(b.label), tuple(r)))
+    br = app.screen.query_one("#banner_r")
+    if str(br.content) and (br.region.right > w or br.region.width < len(str(br.content))): bad.append(("banner_r", tuple(br.region)))
+    return bad
+async def one(w, h):
+    app = LiveApp(cfg, log, "cpu"); bad = []
+    async with app.run_test(size=(w, h)) as pilot:
+        await until(pilot, lambda: app.phase == "ready"); await pilot.pause(0.1); bad += misfit(app, w, h)
+        go(2); go(3)
+        await pilot.press("r"); await until(pilot, lambda: len(logtext(app)) == 3); await pilot.pause(0.1); bad += misfit(app, w, h)
+        await pilot.press("s"); await until(pilot, lambda: app.phase == "review"); await pilot.pause(0.2); bad += misfit(app, w, h)
+        shown_n = len([b for b in app.screen.query("Button") if b.display])
+        await pilot.press("q"); await pilot.pause(0.2)
+    print(f"SIZE {w}x{h}: buttons at review={shown_n} misfits={bad}")
+async def main():
+    for w, h in ((28, 40), (36, 30), (60, 25), (80, 25), (120, 20)): await one(w, h)
+asyncio.run(main())
+' > "$W/ui.out" 2>&1
+[[ -n $STENO_TEST_DEBUG ]] && cat "$W/ui.out"
+for sz in 28x40 36x30 60x25 80x25 120x20; do
+  check "terminal $sz: every visible button fits inside the screen with its whole label (ready, recording, button step); 5 buttons at the button step" 'grep -q "^SIZE '"$sz"': buttons at review=5 misfits=\[\]$" "$W/ui.out"'
+done
+
 echo "== live popup"
 dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_CLIENTS="alpha" FAKE_TMUX_PANES='alpha\t%0\tclaude'
 runui2 '
@@ -547,8 +609,8 @@ async def main():
     print("EXITED")
 asyncio.run(main())
 ' > "$W/ui.out" 2>&1
-check "popup records immediately (no Ready screen), then Stop shows Copy, Send to Claude, Close" 'grep -q "^RECORDING: recording \[.stop.\] | mic opened: True" "$W/ui.out" && grep -q "^REVIEW: \[.copy., .claude., .close.\] Close (q / Esc)" "$W/ui.out"'
-check "popup exits after the choice (Copy): one block, end line copied" 'grep -q "^EXITED" "$W/ui.out" && [[ $(grep -c "^start:" "$DAILY") == 1 && $(cat "$W/clip") == "Clean 15 seconds." ]] && tail -1 "$DAILY" | grep -qE "· ok · copied$"'
+check "popup records immediately (no Ready screen), then Stop shows Copy, Claude append, Claude send, Close" 'grep -q "^RECORDING: recording \[.stop.\] | mic opened: True" "$W/ui.out" && grep -q "^REVIEW: \[.copy., .append., .send., .close.\] Close (q / Esc)" "$W/ui.out"'
+check "popup exits after the choice (Copy): one block, end line copied" 'grep -q "^EXITED" "$W/ui.out" && [[ $(grep -c "^start:" "$DAILY") == 1 && $(cat "$W/clip") == "Clean 15 seconds. " ]] && tail -1 "$DAILY" | grep -qE "· ok · copied$"'
 dfresh; mkdir -p "$W/gate"
 runui2 '
 async def main():
@@ -573,7 +635,7 @@ async def main():
         await until(pilot, lambda: app.phase == "ready"); await pilot.press("r")
         await until(pilot, lambda: app.phase == "notice")
         print("NOTICE:", status(app), shown(app), [str(b.label) for b in app.screen.query("Button") if b.display])
-        await pilot.click("#stopit")
+        await click(pilot, "#stopit")
         await until(pilot, lambda: app.phase == "recording", 25); print("B-RECORDING:", app.phase)
         go(2); go(3); await until(pilot, lambda: len(logtext(app)) == 3)
         await pilot.press("s"); await until(pilot, lambda: app.phase == "review"); await pilot.press("q"); await pilot.pause(0.3)
@@ -592,7 +654,7 @@ async def main():
     app = LiveApp(cfg, log, "cpu")
     async with app.run_test(size=(80, 25)) as pilot:
         await until(pilot, lambda: app.phase == "ready"); await pilot.press("r"); await until(pilot, lambda: app.phase == "notice")
-        await pilot.click("#cancel"); await until(pilot, lambda: app.phase == "ready")
+        await click(pilot, "#cancel"); await until(pilot, lambda: app.phase == "ready")
         print("CANCELLED:", status(app), shown(app)); await pilot.press("q"); await pilot.pause(0.3)
 asyncio.run(main())
 ' > "$W/ui.out" 2>&1
@@ -604,7 +666,7 @@ async def main():
     app = LiveApp(cfg, log, "cpu", popup=True)                            # a popup opening while a pane instance records
     async with app.run_test(size=(80, 25)) as pilot:
         await until(pilot, lambda: app.phase == "notice")
-        print("POPUP-NOTICE:", status(app)); await pilot.click("#cancel"); await pilot.pause(0.4)
+        print("POPUP-NOTICE:", status(app)); await click(pilot, "#cancel"); await pilot.pause(0.4)
     print("POPUP-EXITED")
 asyncio.run(main())
 ' > "$W/ui.out" 2>&1

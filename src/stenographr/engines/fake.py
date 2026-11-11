@@ -44,6 +44,12 @@ class FakeEngine:
         time.sleep(float(os.environ.get("FAKE_ENGINE_CLEAN_DELAY", "0")))        # a slow clean pass
         step = float(os.environ.get("FAKE_ENGINE_CLEAN_SECONDS", "15"))
         words = os.environ.get("FAKE_ENGINE_CLEAN_TEXT", "Clean sentence one.|Clean sentence two.").split("|")
+        seq = os.environ.get("FAKE_ENGINE_CLEAN_SEQ")                # a file: each clean pass takes its first line as its text
+        if seq and os.path.exists(seq):
+            lines = open(seq).read().splitlines()
+            if lines:
+                words = [lines[0]]
+                open(seq, "w").write("\n".join(lines[1:]) + ("\n" if lines[1:] else ""))
         total = len(audio) / SR
         out, t, i = [], 0.0, 0
         while t < total:
