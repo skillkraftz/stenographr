@@ -21,6 +21,8 @@ class FakeEngine:
         if device == "gpu" and os.environ.get("FAKE_ENGINE_FAIL_GPU") == "1":
             raise RuntimeError("fake CUDA failure")
         time.sleep(float(os.environ.get("FAKE_ENGINE_LOAD_DELAY", "0")))     # a slow model load
+        if os.environ.get("FAKE_ENGINE_FAIL") == "1":    # the model cannot be loaded at all (after the delay)
+            raise RuntimeError("fake model load failure")
         self.device = device
 
     def transcribe(self, audio: np.ndarray) -> list[dict]:

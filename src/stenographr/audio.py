@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import queue
 import subprocess
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -34,29 +35,35 @@ def pick_path(archive: Path, start: dt.datetime, mode: str) -> Path:
 class Encoder:
     """Fed with mono float32 @ REC_RATE. `ok` turns False if anything goes wrong; writes then do nothing."""
 
-    def __init__(self, path: Path, log: Log, name: str, err_path: Path):
+    def __init__(self, path: Path, log: Log, name: str):
         self.path, self.log, self.name = path, log, name
         self.ok = True
         self.proc = None
+        self.err = tempfile.TemporaryFile()              # ffmpeg's stderr: no file on disk; read into steno.log on failure
         self.q: queue.Queue = queue.Queue()
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            with open(err_path, "wb") as err:
-                self.proc = subprocess.Popen(
-                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-n", "-f", "f32le", "-ar", str(REC_RATE),
-                     "-ac", "1", "-i", "-", "-c:a", "libopus", "-b:a", BITRATE, "-flush_packets", "1",
-                     "-page_duration", "200000", str(path)],
-                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err, start_new_session=True)
+            self.proc = subprocess.Popen(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-n", "-f", "f32le", "-ar", str(REC_RATE),
+                 "-ac", "1", "-i", "-", "-c:a", "libopus", "-b:a", BITRATE, "-flush_packets", "1",
+                 "-page_duration", "200000", str(path)],
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=self.err, start_new_session=True)
             time.sleep(0.15)                             # a bad path/permissions/codec fails within this
             if self.proc.poll() is not None:
                 self._fail(f"ffmpeg exited at start (rc {self.proc.returncode}): "
-                           f"{err_path.read_text(errors='replace').strip()[:300]}")
+                           f"{self._stderr()}")
         except OSError as e:
             self._fail(f"{type(e).__name__}: {e}")
-        self.err_path = err_path
         if self.ok:
             self.thread = threading.Thread(target=self._pump, daemon=True)
             self.thread.start()
+
+    def _stderr(self) -> str:
+        try:
+            self.err.seek(0)
+            return self.err.read().decode(errors="replace").strip()[:300]
+        except (OSError, ValueError):
+            return ""
 
     def _fail(self, why: str) -> None:
         if self.ok:
@@ -81,6 +88,12 @@ class Encoder:
 
     def close(self) -> bool:
         """Finish the file (the encoder writes its end-of-stream). Returns True if the audio was saved."""
+        try:
+            return self._close()
+        finally:
+            self.err.close()
+
+    def _close(self) -> bool:
         if self.proc is None:
             return False
         if hasattr(self, "thread"):
@@ -96,5 +109,5 @@ class Encoder:
             self.proc.kill()
             rc = -9
         if rc != 0:
-            self._fail(f"ffmpeg exited with {rc}: {self.err_path.read_text(errors='replace').strip()[:300]}")
+            self._fail(f"ffmpeg exited with {rc}: {self._stderr()}")
         return self.ok

@@ -10,7 +10,7 @@ PY=${STENO_PY:-}
 "$PY" -c 'import numpy, textual' 2>/dev/null || { echo "need a python with numpy and textual (set STENO_PY)"; exit 2; }
 
 export PATH=$HERE/fakebin:$PATH PYTHONPATH=$PROJECT/src PYTHONDONTWRITEBYTECODE=1
-export STENOGRAPHR_CONFIG=$W/config.toml FAKE_SMI_SEQ=
+export STENOGRAPHR_TESTING=1 STENOGRAPHR_CONFIG=$W/config.toml FAKE_SMI_SEQ=
 A=$W/archive; OUT=$W/out; LOG=$A/steno.log
 pass=0 fail=0
 ok()  { pass=$((pass+1)); echo "  ok   $1"; }
@@ -239,13 +239,12 @@ check "missing file: error, next file still done" '[[ $(cat "$W/rc") == 1 && -f 
 
 # ======================================================================= dictation
 export XDG_CONFIG_HOME=$W/xdg GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null   # the user's global gitignore must not matter
-export XDG_RUNTIME_DIR=$W/run FAKE_PW_LOG=$W/pw.log FAKE_YDOTOOL_LOG=$W/ydo.log FAKE_CLIP=$W/clip FAKE_GSETTINGS=$W/gs
-dfresh() { fresh; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null; rm -rf "$XDG_RUNTIME_DIR" "$W/pw.log" "$W/ydo.log" "$W/clip" "$W/gate"; unset HB_CLAUDE_PANE TMUX_PANE FAKE_TMUX_SESSENV FAKE_TMUX_SESSION FAKE_MIC_MISSING FAKE_PW_FAIL FAKE_YDOTOOL_FAIL FAKE_ENGINE_TEXT FAKE_ENGINE_SECONDS FAKE_PW_GATE FAKE_PW_CHUNKS FAKE_ENGINE_LOAD_DELAY FAKE_ENGINE_CLEAN_TEXT FAKE_ENGINE_CLEAN_SECONDS FAKE_ENGINE_CLEAN_FAIL FAKE_TMUX_CLIENTS FAKE_TMUX_PANES FAKE_TMUX_SEND_FAIL; rm -f "$W/tmux.log" "$W/kitty.log" "$W/wmctrl.log" "$W/wlcopy.log" "$W/sig"; unset FAKE_WLCOPY_HOLD; }
+export XDG_RUNTIME_DIR=$W/run FAKE_PW_LOG=$W/pw.log FAKE_CLIP=$W/clip FAKE_GSETTINGS=$W/gs
+dfresh() { fresh; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null; rm -rf "$XDG_RUNTIME_DIR" "$W/pw.log" "$W/clip" "$W/gate"; unset HB_CLAUDE_PANE TMUX_PANE FAKE_TMUX_SESSENV FAKE_TMUX_SESSION FAKE_MIC_MISSING FAKE_PW_FAIL FAKE_ENGINE_TEXT FAKE_ENGINE_SECONDS FAKE_PW_GATE FAKE_PW_CHUNKS FAKE_ENGINE_LOAD_DELAY FAKE_ENGINE_CLEAN_TEXT FAKE_ENGINE_CLEAN_SECONDS FAKE_ENGINE_CLEAN_FAIL FAKE_TMUX_CLIENTS FAKE_TMUX_PANES FAKE_TMUX_SEND_FAIL; rm -f "$W/tmux.log" "$W/kitty.log" "$W/wmctrl.log" "$W/wlcopy.log" "$W/sig"; unset FAKE_WLCOPY_HOLD; }
 DAILY=$A/steno-$(date +%F).txt
 BLK='[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}'
 
 waitfor() { local i; for i in $(seq ${2:-120}); do eval "$1" && return 0; sleep 0.05; done; return 1; }
-ydo_n() { local n; n=$(grep -c . "$W/ydo.log" 2>/dev/null); echo "${n:-0}"; }
 endn() { local n; n=$(grep -c '^end:' "$DAILY" 2>/dev/null); echo "${n:-0}"; }
 plus() { date -d "$(date +%F) $1 $2 seconds" +%T; }            # plus HH:MM:SS N -> HH:MM:SS + N seconds
 TS='\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]'
@@ -740,7 +739,7 @@ check "killed (SIGKILL) mid-session: the start line has the audio pointer, the l
 steno recall </dev/null > "$W/rc.out" 2>&1
 check "recall lists the killed session (from its live lines)" 'grep -qE "^1\. \[[0-9]{2}:[0-9]{2}\] live · one two$" "$W/rc.out"'
 dfresh; unset FAKE_ENGINE_TEXT FAKE_ENGINE_CLEAN_TEXT FAKE_ENGINE_CLEAN_SECONDS
-check "ydotool is never called (log absent) and the code no longer mentions it" '[[ ! -e $W/ydo.log ]] && ! grep -rqi ydotool "$PROJECT/src"'
+check "the code does not mention ydotool" '! grep -rqi ydotool "$PROJECT/src"'
 check "type mode is gone: no toggle/_type-session subcommands" '! steno toggle >/dev/null 2>&1 && ! steno _type-session >/dev/null 2>&1'
 
 echo "== notes mode"
@@ -911,5 +910,67 @@ check "install twice: still one entry of ours" '[[ $(cat "$GS/$MK/custom-keybind
 steno keybinding remove >/dev/null
 check "remove: only ours goes, the other stays untouched" '[[ $(cat "$GS/$MK/custom-keybindings") == "['"'$C0'"']" && $(cat "$GS/$MK.custom-keybinding:$C0"/* | md5sum) == "$BEFORE0" && ! -e $GS/$MK.custom-keybinding:$C1/name ]]'
 rm -rf "$GS"; steno keybinding install >/dev/null; check "no existing entries: becomes custom0" '[[ $(cat "$GS/$MK/custom-keybindings") == "['"'$C0'"']" ]]'
+
+echo "== round 1: leaks, lost audio, device, daily file"
+# 1. no .err files; what pw-record said goes to steno.log
+dfresh; mkdir -p "$W/nf0"; (cd "$W/nf0" && FAKE_PW_FAIL=1 steno notes </dev/null >/dev/null 2>&1)
+check "no *.err files in the state dir; pw-record's stderr is in steno.log" '[[ -z $(find "$XDG_RUNTIME_DIR" -name "*.err" 2>/dev/null) ]] && grep -q "WARN  notes pw-record said: fake pw-record: no such target" "$LOG"'
+# 2. model fails to load after audio arrived: the audio still reaches the .opus; start line, FAILED end line, reason in steno.log
+dfresh; mkdir -p "$W/nf"; export FAKE_FF_ENC_LOG=$W/enc2.log; rm -f "$FAKE_FF_ENC_LOG"
+(cd "$W/nf" && FAKE_PW_CHUNKS=1 FAKE_ENGINE_LOAD_DELAY=1 FAKE_ENGINE_FAIL=1 steno notes </dev/null >/dev/null 2>&1); echo $? > "$W/rc"
+check "model load fails: all audio recorded so far is in the .opus (1 x 5 s mono)" 'grep -qE "libopus .*\| 960000$" "$FAKE_FF_ENC_LOG" && [[ $(ls "$A/audio" | wc -l) == 1 ]]'
+check "model load fails: exit 1, start line has the audio pointer, FAILED end line" '[[ $(cat "$W/rc") == 1 ]] && sed -n 1p "$DAILY" | grep -qE "^start: $BLK · notes · .* · audio/[0-9-]+-notes\.opus$" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · FAILED: engine failed, see steno.log$"'
+check "model load fails: steno.log says why" 'grep -q "ERROR notes RuntimeError: fake model load failure" "$LOG"'
+unset FAKE_FF_ENC_LOG
+# 3. clip: the second of the two transcript files fails -> the first is removed, the source counts as failed, the rest goes on
+fresh; mkdir -p "$A"; : > "$A/clips"                        # a FILE where the archive's clips/ folder should be
+V1=$(mkvid 20261108_063820.mp4); V2=$(mkvid camera-clip.mp4)
+steno clip "$V1" "$V2" --out "$OUT" --device cpu >/dev/null 2>"$W/clip.err"; echo $? > "$W/rc"
+DY=$A/steno-$(date +%F).txt
+check "second write fails: exit 1, the first .txt is removed again, the other source is done" '[[ $(cat "$W/rc") == 1 && ! -e $OUT/20261108_063820.txt && -f $OUT/camera-clip.txt && -f $A/other/$(date -d @$(stat -c %Y "$V2") +%F)-camera-clip.txt ]]'
+check "second write fails: logged, FAILED line (no pointer) for it, pointer for the other" 'grep -q "ERROR 20261108_063820.mp4 could not write .*clips/clip-2026-11-08-063820.txt.*removed .*20261108_063820.txt again" "$LOG" && grep -q "20261108_063820 · FAILED: see steno.log" "$DY" && ! grep -q "20261108_063820 →" "$DY" && grep -q "camera-clip → other/" "$DY"'
+rm "$A/clips"; steno clip "$V1" --out "$OUT" --device cpu >/dev/null 2>&1; echo $? > "$W/rc"
+check "after the cause is gone, the retry is not refused" '[[ $(cat "$W/rc") == 0 && -f $OUT/20261108_063820.txt && -f $A/clips/clip-2026-11-08-063820.txt ]]'
+# 4. every daily-file line is one write()
+SW=$("$PY" -c '
+import os, sys, datetime as dt, pathlib
+from stenographr import daily
+from stenographr.log import Log
+calls = []; real = os.write
+def w(fd, b): calls.append(len(b)); return real(fd, b)
+os.write = w
+p = pathlib.Path(sys.argv[1]); now = dt.datetime.now()
+s = daily.Session(Log(p.with_name("l.log")), "t", [(p, None)], now, "live", "unknown", "audio/a.opus")
+s.line("x " * 6000, now); s.end(now, "ok")
+print(len(calls), p.read_text().count("\n"))' "$W/one-write.txt")
+check "start, a very long line and end: one write() each (3 lines, 3 writes)" '[[ $SW == "3 3" ]]'
+# 5. a clip pointer line inside an open live block does not break the block
+PB=$("$PY" -c '
+from stenographr.daily import parse_sessions
+t = """start: 2026-11-11 10:00:00 · live · unknown · audio/a.opus
+[10:00:01] hello there
+clip: 2026-11-11 10:00:05 · 20261108_070641 → clips/clip-2026-11-08-070641.txt
+[10:00:09] second phrase
+end: 2026-11-11 10:00:12 · 12s · ok
+clip: 2026-11-11 10:01:00 · x → clips/y.txt
+"""
+r = parse_sessions(t); print(len(r), r[0].text, r[0].status)')
+check "recall parser: pointer line inside a block: one session, both phrases, its end line" '[[ $PB == "1 hello there second phrase ok" ]]'
+# 6. the device is decided once per app / run
+DD=$("$PY" -c '
+import stenographr.runner as r
+from stenographr.config import Config
+calls = []; r.pick_device = lambda cfg, log, name, req: (calls.append(1), "gpu" if len(calls) == 1 else "cpu")[1]
+e = r.Engines(Config(), None); print(e.decide("auto", "live"), e.decide("auto", "live"), len(calls))')
+check "Engines.decide: first decision kept, decided once" '[[ $DD == "gpu gpu 1" ]]'
+dfresh; mkconf ""; nstart "$W/nd1" FAKE_PW_CHUNKS=1; nwait 1; nstop
+check "notes, no config device: CPU even though the GPU is free" 'grep -q " notes device: cpu " "$LOG"'
+dfresh; mkconf 'device = "gpu"'; nstart "$W/nd2" FAKE_PW_CHUNKS=1; nwait 1; nstop
+check "notes, config device = gpu: still honoured" 'grep -q " notes device: gpu " "$LOG"'
+dfresh; mkconf ""; steno clip "$(mkvid 20261108_063820.mp4)" --out "$OUT" >/dev/null 2>&1
+check "clip keeps auto: GPU when it is free" 'grep -q "device: gpu (free VRAM" "$LOG"'
+# 7. leftovers
+check "no window_title; no type mode in the daily.py docstring" '! grep -rq --include=*.py window_title "$PROJECT/src" && ! grep -q " type " "$PROJECT/src/stenographr/daily.py"'
+check "the fake engine is not registered without STENOGRAPHR_TESTING" '[[ $(env -u STENOGRAPHR_TESTING "$PY" -c "from stenographr.engines import FACTORIES; print(\"fake\" in FACTORIES)") == False ]]'
 
 echo; echo "$pass passed, $fail failed"; [[ $fail == 0 ]]

@@ -1,14 +1,17 @@
 """Session blocks in the daily file (<archive>/steno-YYYY-MM-DD.txt) and in a notes file.
 
-  start: 2026-11-09 10:00:00 · type · <window title or unknown>
+  start: 2026-11-09 10:00:00 · live · <where> · audio/<file>.opus
   <text>
   end: 2026-11-09 10:00:42 · 42s · ok
 
-Append only. Clip/other pointer lines live in the same file (written by `clip`); sessions never touch them.
+Append only. Clip/other pointer lines live in the same file (written by `clip`); sessions never touch them, and
+a pointer line that lands inside an open block does not end it (see parse_sessions). Every line is ONE write() call
+(append_line), so lines from different writers never get mixed inside a line.
 """
 from __future__ import annotations
 
 import datetime as dt
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +31,17 @@ def fmt_dur(seconds: float) -> str:
     if h:
         return f"{h}h{m:02d}m{sec:02d}s"
     return f"{m}m{sec:02d}s" if m else f"{sec}s"
+
+
+def append_line(path: Path, text: str) -> None:
+    """Append `text` (one or more whole lines) with a single write() on an O_APPEND file."""
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    try:
+        data = text.encode("utf-8")
+        if os.write(fd, data) != len(data):
+            raise OSError("short write")
+    finally:
+        os.close(fd)
 
 
 def daily_path(archive: Path, day: dt.datetime) -> Path:
@@ -62,8 +76,7 @@ class Session:
                     text_out = header + "\n" + text
                 else:
                     text_out = text
-                with open(path, "a", encoding="utf-8") as f:
-                    f.write(text_out)
+                append_line(path, text_out)
             except OSError as e:
                 self.log.error(self.name, f"could not write {path}: {type(e).__name__}: {e}")
 
@@ -103,7 +116,7 @@ _POINTER = re.compile(r"^(clip|other): ")
 
 def parse_sessions(text: str, day: str = "") -> list[Parsed]:
     """Sessions in file order. A session's text is its lines up to its end line, or, if that is missing,
-    up to the next start/pointer line or the end of the file."""
+    up to the next start line or the end of the file. Pointer lines are skipped."""
     out: list[Parsed] = []
     cur: dict | None = None
 
@@ -126,7 +139,7 @@ def parse_sessions(text: str, day: str = "") -> list[Parsed]:
             cur["status"] = _END.match(line).group(1)
             close()
         elif _POINTER.match(line):
-            close()
+            pass                                         # `clip` appended it while this block was open: not part of it
         elif cur is not None and line.strip() == "clean:":
             cur["in_clean"] = True                       # what follows is the cleaned-up text; recall prefers it
         elif cur is not None and line.strip():

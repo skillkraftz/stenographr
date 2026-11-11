@@ -5,6 +5,7 @@ Which one is used comes from config (`engine`); add new ones by registering a fa
 """
 from __future__ import annotations
 
+import os
 from typing import Callable, Protocol
 
 import numpy as np
@@ -48,13 +49,13 @@ def _fake(cfg: Config, device: str) -> Engine:
 
 FACTORIES: dict[str, Callable[[Config, str], Engine]] = {
     "parakeet-tdt-0.6b-v2-int8": _parakeet,
-    "fake": _fake,                       # tests only
 }
+if os.environ.get("STENOGRAPHR_TESTING") == "1":   # the fake engine exists only when the test script asks for it
+    FACTORIES["fake"] = _fake
 
 
 def gpu_runtime_available(engine: str) -> bool:
-    if engine == "fake":
-        import os
+    if engine == "fake" and "fake" in FACTORIES:
         return os.environ.get("FAKE_ENGINE_GPU", "1") == "1"
     from .parakeet import gpu_runtime_available as g
     return g()

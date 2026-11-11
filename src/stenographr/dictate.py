@@ -11,6 +11,7 @@ import queue
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -22,7 +23,7 @@ from . import audio as audiomod
 from . import clipboard, daily
 from .log import Log
 from .record import Down3, channel_of, mic_exists, recorder_cmd
-from .runner import Engines, pick_device
+from .runner import Engines
 
 
 # ---------------------------------------------------------------- shared
@@ -76,25 +77,34 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
             signal.signal(sig, lambda *_: stop.set())
 
     _state_dir().mkdir(parents=True, exist_ok=True, mode=0o700)
-    enc = audiomod.Encoder(audiomod.pick_path(cfg.archive, t0, mode), log, name, _state_dir() / f"{name}.audio.err")
+    enc = audiomod.Encoder(audiomod.pick_path(cfg.archive, t0, mode), log, name)
     audio_ptr = f"audio/{enc.path.name}" if enc.ok else "audio: none"
-    err = open(_state_dir() / f"{name}.err", "wb")
+    err = tempfile.TemporaryFile()                       # pw-record's stderr: no file on disk; goes to steno.log below
     proc = subprocess.Popen(recorder_cmd(cfg.mic, "-"), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=err, start_new_session=True)
     q: queue.Queue = queue.Queue()
 
     def pump():
-        fd = proc.stdout.fileno()
+        """The only writer of the encoder: everything the recorder sends reaches the .opus, whatever the model does.
+        The mono 48 kHz frames go on to the loop through `q`."""
+        fd, rest = proc.stdout.fileno(), b""
         while True:
             try:
                 b = os.read(fd, 65536)
             except OSError:
                 b = b""
-            q.put(b or None)
             if not b:
+                q.put(None)
                 return
+            rest += b
+            k = len(rest) // 8 * 8                       # whole stereo float32 frames only
+            data, rest = rest[:k], rest[k:]
+            mono = channel_of(data, cfg.channel)         # 48 kHz, the voice channel
+            enc.write(mono.tobytes())
+            q.put(mono)
 
-    threading.Thread(target=pump, daemon=True).start()
+    pump_thread = threading.Thread(target=pump, daemon=True)
+    pump_thread.start()
     sess = daily.Session(log, name, targets, t0, mode, where, audio_ptr)
     log.info(name, f"start: {where}, mic {cfg.mic} channel {cfg.channel}, {audio_ptr}")
 
@@ -114,7 +124,7 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
 
     stream = None
     try:
-        device = pick_device(cfg, log, name, requested)
+        device = engines.decide(requested, name)
         try:
             stream = engines.get(device, name).stream()
         except Exception as e:                           # noqa: BLE001
@@ -123,7 +133,7 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
             log.error(name, f"GPU engine failed, using CPU: {type(e).__name__}: {e}")
             stream = engines.get("cpu", name).stream()
 
-        rest, stopping, down = b"", False, Down3()
+        stopping, down = False, Down3()
         while True:
             if stop.is_set() and not stopping:
                 stopping = True                          # no more audio: stop the recorder (SIGTERM: pw-record flushes on it like on SIGINT, and it can never be inherited as ignored), drain what it sent
@@ -144,12 +154,7 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
                     log.error(name, "pw-record closed its output unexpectedly")
                     status = daily.failed("recorder exited")
                 break
-            rest += b
-            k = len(rest) // 8 * 8                       # whole stereo float32 frames only
-            data, rest = rest[:k], rest[k:]
-            mono = channel_of(data, cfg.channel)         # 48 kHz, the voice channel
-            enc.write(mono.tobytes())
-            small = down(mono)                           # 16 kHz, for the VAD/model
+            small = down(b)                           # 16 kHz, for the VAD/model
             if keep_pcm:
                 pcm.append(small)
             emit(stream.accept(small))
@@ -166,6 +171,14 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
             proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
             proc.kill()
+        pump_thread.join(timeout=5)                      # everything the recorder sent is in the encoder before it closes
+        try:
+            err.seek(0)
+            why = err.read().decode(errors="replace").strip()
+            if why:
+                log.warn(name, f"pw-record said: {why[:500]}")
+        finally:
+            err.close()
 
     saved = enc.close()                                  # the encoder writes the end of the file
     if not saved and status.startswith("ok"):
