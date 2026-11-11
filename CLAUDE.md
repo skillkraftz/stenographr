@@ -24,11 +24,12 @@ without activating a venv. Runs locally; no network at runtime (models are downl
 | `src/stenographr/tmuxsend.py` | Find the Claude pane with tmux and `send-keys -l` into it (Enter only for the Send button; no hyperbeam import) |
 | `src/stenographr/record.py` | Mic node check, `pw-record` command (48 kHz), channel pick, `Down3` (48->16 kHz) |
 | `src/stenographr/audio.py` | Session audio: ffmpeg Opus encoder fed while recording, file naming |
+| `src/stenographr/update.py` | `stenographr update`: ff-only pull of the source checkout, reinstall if pyproject changed, list instances to restart |
 | `src/stenographr/recall.py` | `recall [N]` (read-only) |
 | `src/stenographr/keybind.py` | The GNOME Ctrl+` keybinding (touches only its own entry) |
 | `src/stenographr/log.py` | `<archive>/steno.log` |
 | `SPEC.md` | The spec: layout, formats, what is built and what is open |
-| `tests/` | `run-tests.sh`; fakes in `tests/fakebin/` (nvidia-smi, ffmpeg (clip extraction and the Opus encoder), ffprobe, pw-record, pw-dump, wl-copy, xclip, wmctrl, gsettings, tmux, kitty) and a fake engine |
+| `tests/` | `run-tests.sh`; fakes in `tests/fakebin/` and, for `update` only, git/uv in `tests/fakeupd/` (nvidia-smi, ffmpeg (clip extraction and the Opus encoder), ffprobe, pw-record, pw-dump, wl-copy, xclip, wmctrl, gsettings, tmux, kitty) and a fake engine |
 | `bench/` | Benchmark script (real data, outputs to /tmp only) |
 
 ## Tests

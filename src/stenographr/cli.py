@@ -140,6 +140,11 @@ def cmd_recall(args) -> int:
     return recallmod.recall(cfg.archive, args.n)
 
 
+def cmd_update(args) -> int:
+    from . import update
+    return update.update()
+
+
 def cmd_keybinding(args) -> int:
     import shutil
     try:
@@ -187,6 +192,8 @@ def main(argv: list[str] | None = None) -> int:
     k = sub.add_parser("keybinding", help="install/remove the Ctrl+` GNOME shortcut for live --toggle")
     k.add_argument("action", choices=["install", "remove"])
     k.set_defaults(fn=cmd_keybinding)
+    u = sub.add_parser("update", help="git pull --ff-only the source checkout (clean main only); reinstall if pyproject changed")
+    u.set_defaults(fn=cmd_update)
     args = ap.parse_args(argv)
     return args.fn(args)
 
