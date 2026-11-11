@@ -712,6 +712,12 @@ T1=$(date +%s); OUTC=$("$PY" -c "from stenographr import dictate, recall; dictat
 check "wl-copy: Copy returns at once although wl-copy leaves a background process (nothing of ours is held open, so a caller waiting on the output pipe is not stuck)" '(( T2 - T1 < 3 )) && [[ $(grep -c . "$W/wlcopy.log") == 2 ]] && [[ $(cat "$W/clip") == "hello world" ]]'
 check "wl-copy: started with stdout/stderr on /dev/null (no captured pipes) and in its own process group (a closing window does not take it down)" 'grep -qx "out=/dev/null err=/dev/null own_group=yes" "$W/wlcopy.log"'
 unset FAKE_WLCOPY_HOLD
+dfresh; rm -f "$W/xclip.log"; export FAKE_XCLIP_LOG=$W/xclip.log
+T1=$(date +%s); FAKE_WLCOPY_HANG=1 "$PY" -c "from stenographr import clipboard; clipboard.copy('via xclip ')"; T2=$(date +%s)
+check "wl-copy hangs (no Wayland focus): after ~3 s the text goes through xclip -selection clipboard" '[[ $(cat "$W/clip") == "via xclip " ]] && grep -qx -- "-selection clipboard" "$W/xclip.log" && (( T2 - T1 < 8 ))'
+rm -f "$W/xclip.log"; "$PY" -c "from stenographr import clipboard; clipboard.copy('plain ')"
+check "wl-copy works: xclip is not used" '[[ $(cat "$W/clip") == "plain " && ! -e $W/xclip.log ]]'
+unset FAKE_XCLIP_LOG
 echo "== live: the window goes away"
 dfresh; mkdir -p "$W/gate"; export FAKE_ENGINE_TEXT="one|two|three" FAKE_ENGINE_CLEAN_TEXT="Clean {secs} seconds." FAKE_ENGINE_CLEAN_SECONDS=100 FAKE_PW_GATE=$W/gate
 "$PY" -m stenographr.cli $LIVEARGS >/dev/null 2>&1 & LP=$!

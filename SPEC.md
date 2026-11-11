@@ -254,6 +254,10 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
     -o initial_window_height=25c` gives exactly 25 rows x 80 columns; when that window closed, X focus went back to
     the previously active window. Always on top: GNOME/Wayland has no API, so the popup (only) runs under XWayland and `wmctrl` (installed 2026-11-11) sets
     `_NET_WM_STATE_ABOVE` and raises it. Not verified in a real window from the assistant's shell (a guard blocks GUI apps there).
+  - **Copy falls back to xclip (changed 2026-11-11):** on GNOME wl-copy needs keyboard focus on a Wayland window; the popup holds
+    the focus as an X11 window (XWayland), so wl-copy hung for the whole 10 s (steno.log 2026-11-11 12:28: `clipboard (wl-copy) failed:
+    TimeoutExpired`). `clipboard.copy` now gives wl-copy 3 s, then sends the text through `xclip -selection clipboard` (detached the
+    same way; needs `xclip`). Still unverified in a real popup: see the hand test in the PR.
   - **Copy (wl-copy)** is `clipboard.copy`, shared by live and recall: stdin is the only pipe, stdout/stderr go to /dev/null, and wl-copy
     starts in its own session. wl-copy leaves a background process that serves the clipboard; with captured or inherited pipes the
     caller waits for it, and in the popup's process group it dies when the window closes (clipboard empties).
@@ -287,7 +291,7 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
 - **Hotkey:** `stenographr keybinding install` adds (or updates) a GNOME custom keybinding "stenographr dictation",
   `<Control>grave`, command = the absolute path of `stenographr` + ` live --toggle` (it only opens or stops the popup); it appends to the existing
   list and never changes other entries. `stenographr keybinding remove` removes only that entry.
-- Needs `pw-record`, `pw-dump`, `ffmpeg` (with libopus), `wl-copy`, `kitty` (for the Ctrl+` window), `tmux` (only for Send to
+- Needs `pw-record`, `pw-dump`, `ffmpeg` (with libopus), `wl-copy` (and `xclip` as its fallback in the popup), `kitty` (for the Ctrl+` window), `tmux` (only for Send to
   Claude), `git` (notes mode only); the one Python dependency added for this is `textual`.
 
 ## Other decisions
