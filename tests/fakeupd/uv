@@ -1,0 +1,4 @@
+#!/bin/sh
+# Fake uv: logs "args | cwd" to $FAKE_UV_LOG.
+echo "$* | $(pwd)" >> "${FAKE_UV_LOG:-/dev/null}"
+exit 0

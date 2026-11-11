@@ -294,6 +294,18 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
 - Needs `pw-record`, `pw-dump`, `ffmpeg` (with libopus), `wl-copy` (and `xclip` as its fallback in the popup), `kitty` (for the Ctrl+` window), `tmux` (only for Send to
   Claude), `git` (notes mode only); the one Python dependency added for this is `textual`.
 
+## 6. `stenographr update` (BUILT 2026-11-11)
+- The tool is installed editable, so the running code is the checkout the package sits in: the source path is two folders
+  above `update.py`, whatever the current directory is. Not a git checkout -> message, exit 1.
+- Prints `source`, `branch`, `commit` (short hash + subject) and `origin: N ahead, M behind origin/main` after `git fetch`
+  (a failed fetch stops with exit 1).
+- Not on `main`, or uncommitted changes (the files are listed): says so and stops, exit 1. It never stashes, resets or
+  switches branches.
+- Otherwise `git pull --ff-only` when behind, prints the pulled commits, and if `pyproject.toml` changed in them reruns
+  `uv tool install --editable ".[gpu]" --force` from the checkout. Ends with `updated to <commit>` or `up to date at <hash>`.
+- Then lists the running live instances from the registry (pid, kind popup/loop, where: popup, tmux pane or terminal);
+  after a pull it says to restart them. It never stops or kills anything.
+
 ## Other decisions
 - Corrections file for mis-heard names: dropped (transcripts mostly go to AI, which infers meaning).
   (changed 2026-11-09)

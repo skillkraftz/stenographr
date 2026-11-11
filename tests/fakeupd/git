@@ -1,0 +1,16 @@
+#!/bin/sh
+# Fake git for `stenographr update` (only first on PATH in the update tests). State from env:
+# FAKE_GIT_BRANCH (main), FAKE_GIT_DIRTY (1 = uncommitted changes), FAKE_GIT_AHEAD/BEHIND (0), FAKE_GIT_PYPROJECT (1 = pyproject.toml changed).
+# Every call is logged to $FAKE_GIT_LOG.
+[ "$1" = -C ] && shift 2
+echo "git $*" >> "${FAKE_GIT_LOG:-/dev/null}"
+case "$1" in
+  rev-parse) case "$2" in --git-dir) echo .git ;; --abbrev-ref) echo "${FAKE_GIT_BRANCH:-main}" ;; HEAD) echo abc1234def ;; esac ;;
+  fetch) [ "$FAKE_GIT_FETCH_FAIL" = 1 ] && { echo "fatal: unable to access" >&2; exit 1; }; exit 0 ;;
+  log) case "$*" in *..*) echo "bbb2222 second pulled commit"; echo "ccc3333 first pulled commit" ;; *) echo "abc1234 Fake subject" ;; esac ;;
+  rev-list) printf '%s\t%s\n' "${FAKE_GIT_AHEAD:-0}" "${FAKE_GIT_BEHIND:-0}" ;;
+  status) [ "$FAKE_GIT_DIRTY" = 1 ] && echo " M src/stenographr/cli.py" ;;
+  pull) exit 0 ;;
+  diff) echo README.md; [ "$FAKE_GIT_PYPROJECT" = 1 ] && echo pyproject.toml ;;
+esac
+exit 0

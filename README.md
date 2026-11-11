@@ -25,7 +25,13 @@ curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherp
 ```sh
 stenographr clip VIDEO... [--out DIR] [--recorded-at "YYYY-MM-DD HH:MM"] [--device cpu|gpu|auto]
 stenographr srt FILE.txt              # writes FILE.srt next to it (never automatic)
+stenographr update                    # from any directory: git pull --ff-only the source checkout (see below)
 ```
+
+`update` prints the source path, branch, commit and how far it is ahead/behind `origin` (after a `git fetch`). It only
+pulls when the checkout is on a clean `main` (never stashes, resets or switches branches), reruns
+`uv tool install --editable ".[gpu]" --force` if `pyproject.toml` changed, and ends by listing the running
+`stenographr live` instances (pid, popup or tmux pane) that need a restart. It never stops them.
 
 `clip` writes `DIR/<basename>.txt` (default `DIR`: the video's own folder) and an archive copy (flat folders, easy to
 prune by hand):
