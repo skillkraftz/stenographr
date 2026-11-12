@@ -26,6 +26,7 @@ curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherp
 ```sh
 stenographr clip VIDEO... [--out DIR] [--recorded-at "YYYY-MM-DD HH:MM"] [--device cpu|gpu|auto]
 stenographr srt FILE.txt              # writes FILE.srt next to it (never automatic)
+stenographr --version
 stenographr update                    # from any directory: git pull --ff-only the source checkout (see below)
 ```
 

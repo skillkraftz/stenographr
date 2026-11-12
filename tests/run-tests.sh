@@ -1047,4 +1047,7 @@ supd
 check "up to date: instances are listed without the restart hint" 'grep -q "^running live instances:$" "$UD/out" && ! grep -q "restart them" "$UD/out"'
 unset FAKE_GIT_LOG FAKE_UV_LOG
 
+echo "== version"
+check "--version prints the name and a version" '[[ $(steno --version) =~ ^stenographr\ [^\ ]+$ ]]'
+
 echo; echo "$pass passed, $fail failed"; [[ $fail == 0 ]]
