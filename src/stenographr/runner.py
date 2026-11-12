@@ -6,7 +6,7 @@ import time
 
 from . import clip as clipmod
 from . import device as devmod
-from .engines import gpu_runtime_available, make_engine
+from .engines import gpu_runtime_available, make_engine, make_stream_engine
 from .log import Log
 
 
@@ -18,7 +18,25 @@ class Engines:
         self.built: dict[str, object] = {}
         self.failed: dict[str, Exception] = {}       # a device that could not be built stays failed for the run
         self._lock = threading.Lock()                # the live app preloads in a thread while a capture may ask too
+        self._stream_lock = threading.Lock()
+        self.stream_engine = None                    # the live preview model (CPU), built once per app
+        self.stream_failed: Exception | None = None
         self.decided: str | None = None              # live/notes: the device is decided once (decide()); clip decides per file
+
+    def get_stream(self, name: str):
+        """The streaming preview model: built once (CPU, whatever the device of the clean pass is)."""
+        with self._stream_lock:
+            if self.stream_failed:
+                raise self.stream_failed
+            if self.stream_engine is None:
+                t0 = time.monotonic()
+                try:
+                    self.stream_engine = make_stream_engine(self.cfg)
+                except Exception as e:               # noqa: BLE001
+                    self.stream_failed = e
+                    raise
+                self.log.info(name, f"stream engine loaded: {type(self.stream_engine).__name__} load={time.monotonic() - t0:.2f}s")
+            return self.stream_engine
 
     def decide(self, requested: str, name: str) -> str:
         """The device for the whole run: decided on the first call, reused after (so a capture never builds a second

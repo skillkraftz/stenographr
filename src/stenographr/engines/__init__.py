@@ -47,11 +47,27 @@ def _fake(cfg: Config, device: str) -> Engine:
     return FakeEngine(cfg, device)
 
 
+def _nemotron(cfg: Config):
+    from .nemotron import NemotronStreamEngine
+    return NemotronStreamEngine(cfg)
+
+
+def _fake_stream(cfg: Config):
+    from .fake import FakeStreamEngine
+    return FakeStreamEngine()
+
+
+# the live preview model (words while you talk); `notes` and the clean pass never use it
+STREAM_FACTORIES: dict[str, Callable[[Config], object]] = {
+    "parakeet-tdt-0.6b-v2-int8": _nemotron,
+}
+
 FACTORIES: dict[str, Callable[[Config, str], Engine]] = {
     "parakeet-tdt-0.6b-v2-int8": _parakeet,
 }
 if os.environ.get("STENOGRAPHR_TESTING") == "1":   # the fake engine exists only when the test script asks for it
     FACTORIES["fake"] = _fake
+    STREAM_FACTORIES["fake"] = _fake_stream
 
 
 def gpu_runtime_available(engine: str) -> bool:
@@ -67,3 +83,11 @@ def make_engine(cfg: Config, device: str) -> Engine:
     except KeyError:
         raise ValueError(f"unknown engine {cfg.engine!r}; known: {', '.join(sorted(FACTORIES))}")
     return f(cfg, device)
+
+
+def make_stream_engine(cfg: Config):
+    try:
+        f = STREAM_FACTORIES[cfg.engine]
+    except KeyError:
+        raise ValueError(f"no streaming preview model for engine {cfg.engine!r}")
+    return f(cfg)

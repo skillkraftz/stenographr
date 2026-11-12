@@ -517,7 +517,7 @@ check "Start (r) records: only Stop shown, the recorder is opened now" 'grep -q 
 check "button step (loop): Copy, Claude append (a), Claude send (e), New, Close; project name on the bar" 'grep -q "^REVIEW: \[.copy., .append., .send., .new., .close.\] | Claude append (a) | Claude send (e) | alpha" "$W/ui.out"'
 check "after Copy: back on Ready with 'Last: copied · HH:MM'; after Send: 'Last: sent to claude alpha · HH:MM'" 'grep -qE "^AFTER-COPY: Ready \| Last: copied · [0-9]{2}:[0-9]{2}$" "$W/ui.out" && grep -qE "^AFTER-SEND: Ready \| Last: sent to claude alpha · [0-9]{2}:[0-9]{2}$" "$W/ui.out" && grep -q "^EXITED" "$W/ui.out"'
 check "two captures: two session blocks (end words copied / sent to claude alpha), two audio files, the typed text + one Enter, the clipboard has the clean text plus a space" '[[ $(grep -c "^start:" "$DAILY") == 2 && $(ls "$A/audio" | wc -l) == 2 ]] && grep -qE "· ok · copied$" "$DAILY" && grep -qE "· ok · sent to claude alpha$" "$DAILY" && [[ $(grep -c "^send-keys|" "$W/tmux.log") == 2 && $(cat "$W/clip") == "Clean 15 seconds. " ]]'
-check "the model was constructed ONCE for the whole app (two captures)" '[[ $(grep -c . "$W/count") == 1 ]] && [[ $(grep -c "engine loaded" "$LOG") == 1 ]]'
+check "the model was constructed ONCE for the whole app (two captures)" '[[ $(grep -c . "$W/count") == 1 ]] && [[ $(grep -c " live engine loaded" "$LOG") == 1 ]]'
 check "no 'no running event loop' anywhere in the log (a capture ending and another beginning)" '! grep -q "no running event loop" "$LOG" && ! grep -q "ERROR" "$LOG"'
 dfresh; mkdir -p "$W/gate"; : > "$W/count"; export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude'
 runui2 '
@@ -978,6 +978,50 @@ check "clip keeps auto: GPU when it is free" 'grep -q "device: gpu (free VRAM" "
 # 7. leftovers
 check "no window_title; no type mode in the daily.py docstring" '! grep -rq --include=*.py window_title "$PROJECT/src" && ! grep -q " type " "$PROJECT/src/stenographr/daily.py"'
 check "the fake engine is not registered without STENOGRAPHR_TESTING" '[[ $(env -u STENOGRAPHR_TESTING "$PY" -c "from stenographr.engines import FACTORIES; print(\"fake\" in FACTORIES)") == False ]]'
+
+echo "== streaming preview (live only)"
+dfresh; mkdir -p "$W/gate"; export FAKE_STREAM_COUNT=$W/scount; : > "$FAKE_STREAM_COUNT"
+FAKE_ENGINE_SECONDS=2 FAKE_STREAM_STEP=4 FAKE_PW_CHUNKS=2 runcore '
+s = LiveSession(cfg, log, "cpu"); s.phrases = []; s.partials = []; s.on_phrase = s.phrases.append; s.on_partial = s.partials.append
+assert s.preflight() is None
+s.record_thread = threading.Thread(target=s.record); s.record_thread.start()
+wait(lambda: s.partials[-1:] == ["one"])
+print("BEFORE:", s.phrases, "one" in daily_text().split("clean:")[0].replace("start:", ""), s.record_thread.is_alive())
+go(2); wait(lambda: s.phrases == ["one"])
+print("LINE-IN-DAILY-BEFORE-STOP:", [l for l in daily_text().splitlines() if l.endswith("] one")] != [])
+s.request_stop(); s.record_thread.join(10); s.clean(); print("TEXT:", s.text())
+print("PARTIALS:", s.partials)
+' > "$W/core.out" 2>&1
+check "words show before stop: the line in progress is reported (first word) while nothing is finished or filed yet" 'grep -q "^BEFORE: \[\] False True" "$W/core.out"'
+check "a line is filed (daily, [HH:MM:SS] text) when it ends, still before stop; the partial is cleared after" 'grep -q "^LINE-IN-DAILY-BEFORE-STOP: True" "$W/core.out" && grep -q "^PARTIALS: \[.one., ..\]" "$W/core.out"'
+check "the streaming model, not the per-phrase decode, made the lines (one 4 s line, not two 2 s ones); loaded once" 'grep -q "^BEFORE" "$W/core.out" && [[ $(grep -c "\] one$" "$DAILY") == 1 && $(grep -c "\] two$" "$DAILY") == 0 ]] && grep -q "INFO  live stream engine loaded" "$LOG" && [[ $(grep -c . "$FAKE_STREAM_COUNT") == 1 ]]'
+check "at stop the clean pass runs as before and its text replaces the live text (clean: block, text())" 'grep -q "^TEXT: Clean 4 seconds. Second sentence." "$W/core.out" && grep -q "^clean:$" "$DAILY"'
+dfresh; mkdir -p "$W/gate"
+FAKE_STREAM_FAIL=1 FAKE_ENGINE_SECONDS=2 FAKE_PW_CHUNKS=2 runcore '
+s = start(); go(2); wait(lambda: len(s.phrases) == 2); s.request_stop(); s.record_thread.join(10); print("PHRASES:", s.phrases)
+' > "$W/core.out" 2>&1
+check "no streaming model (fails to load): falls back to the per-phrase decode, logged, nothing lost" 'grep -q "^PHRASES: \[.one., .two.\]" "$W/core.out" && grep -q "ERROR live streaming preview model failed, using the per-phrase Parakeet decode" "$LOG"'
+dfresh; mkdir -p "$W/gate"; : > "$FAKE_STREAM_COUNT"; export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude'
+FAKE_ENGINE_SECONDS=2 FAKE_STREAM_STEP=4 FAKE_PW_CHUNKS=2 runui '
+async def main():
+    app = LiveApp(cfg, log, "cpu", popup=True)
+    async with app.run_test(size=(80, 25)) as pilot:
+        await until(pilot, lambda: logtext(app) == ["one"])
+        print("PARTIAL:", logtext(app), app.phase, app._lines)
+        go(2); await until(pilot, lambda: app._lines == ["one"] and app._partial_text == "")
+        print("LINE:", logtext(app))
+        await click(pilot, "#stop"); await until(pilot, lambda: app.phase == "review")
+        print("REVIEW:", logtext(app))
+        await pilot.press("q"); await pilot.pause(0.2)
+asyncio.run(main())
+' > "$W/ui.out" 2>&1
+check "screen: the word appears while recording (before any line is finished), the line replaces it, the clean text replaces both at stop" 'grep -q "^PARTIAL: \[.one.\] recording \[\]" "$W/ui.out" && grep -q "^LINE: \[.one.\]" "$W/ui.out" && grep -q "^REVIEW: \[.Clean 4 seconds..\]" "$W/ui.out"'
+check "the screen loaded the streaming model once (preload + capture share it)" '[[ $(grep -c . "$FAKE_STREAM_COUNT") == 1 ]]'
+unset FAKE_STREAM_COUNT HB_CLAUDE_PANE FAKE_TMUX_PANES
+dfresh; : > "$W/scount"; export FAKE_STREAM_COUNT=$W/scount; mkdir -p "$W/nn"
+nstart "$W/nn" FAKE_PW_CHUNKS=1 FAKE_ENGINE_TEXT="again"; nwait 1; nstop
+check "notes is unchanged: it never loads the streaming model, its lines come from the per-phrase decode" '[[ $(cat "$W/notes.out") == again ]] && [[ ! -s $W/scount ]] && ! grep -q "stream engine" "$LOG"'
+unset FAKE_STREAM_COUNT
 
 echo "== update"
 UD=$W/upd; mkdir -p "$UD"; export FAKE_GIT_LOG=$UD/git.log FAKE_UV_LOG=$UD/uv.log

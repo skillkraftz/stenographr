@@ -261,6 +261,22 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
   - **Copy (wl-copy)** is `clipboard.copy`, shared by live and recall: stdin is the only pipe, stdout/stderr go to /dev/null, and wl-copy
     starts in its own session. wl-copy leaves a background process that serves the clipboard; with captured or inherited pipes the
     caller waits for it, and in the popup's process group it dies when the window closes (clipboard empties).
+- **Streaming preview in `live` (BUILT 2026-11-11):** while recording, words appear as they are spoken: lowercase, no
+  punctuation, the line in progress redrawn on screen as it grows, a new line at each endpoint. The streaming model is
+  `sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25` (`engines/nemotron.py`, sherpa-onnx online
+  transducer, CPU, 2 threads, ~1.3 GB RSS, loads in ~1.6 s; license: NVIDIA Open Model License). It replaces the per-phrase
+  Parakeet live decode: while recording only the streaming model runs. Lines are cut by `nemotron.py` from the token times and the model is never reset (its own endpointing resets the model
+  and a reset drops the audio still in its pipeline: 6-7 % of the words lost, measured): a line ends when 1.8 s of audio
+  pass without a new word (about a 1.2 s pause; the model lags a word by ~0.6 s) or at the next word after 15 s. On saved
+  audio that gave 14 lines for 89 words and 39 lines for 460 words, with no words lost against an unsegmented run. Measured 2026-11-11 on
+  saved audio: a word shows about 0.4 s after it is spoken (median; 0.7 s from the word's start). Each finished line goes
+  to the daily file at once as `[HH:MM:SS] text` (lowercase; the time is the line's first word); the line in progress is
+  screen-only. Both models load in the background at app start (the streaming model first); audio is queued until the
+  streaming model is ready, as before. If the streaming model cannot load (missing files...), steno.log says so and that
+  capture uses the per-phrase Parakeet decode. At stop nothing changes: the clean pass (Parakeet, `transcribe_long`) runs,
+  its text replaces the live text on screen, the `clean:` block is written, and the button step is as before. Needs the model
+  in the models folder next to Parakeet (README). `notes` is not touched: it keeps the per-phrase Parakeet decode and never
+  loads the streaming model. No config switch.
 - **Notes mode**, `stenographr notes` (aliasable to `steno`): runs in the terminal until Ctrl+C. Text
   appears sentence by sentence as I pause (Silero VAD fed live, 0.6 s of silence ends a sentence); each
   sentence is appended at once to the notes file and to the daily file (timestamped there; the terminal

@@ -18,6 +18,7 @@ Models are downloaded once, by hand, into `~/.local/share/stenographr/models`:
 cd ~/.local/share/stenographr/models
 curl -LO https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
 curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2 | tar xj
+curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25.tar.bz2 | tar xj   # live preview, ~0.5 GB download
 ```
 
 ## Use

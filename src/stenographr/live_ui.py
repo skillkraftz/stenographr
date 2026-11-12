@@ -105,6 +105,8 @@ class LiveApp(App):
         self.cfg, self.slog, self.requested, self.popup = cfg, log, requested, popup
         self.engines = Engines(cfg, log)           # one model for the app's whole life
         self.session: LiveSession | None = None
+        self._lines: list[str] = []                # the live lines on screen while recording
+        self._partial_text = ""                    # the line in progress
         self.entry = None                          # registry.Entry (set by live.run)
         self.closing = False
         self.phase = "starting"        # ready | notice | recording | stopping | cleaning | review | picking | error
@@ -227,7 +229,11 @@ class LiveApp(App):
         """Load the model in the background, once, for the app's lifetime (a capture that starts before it is
         loaded keeps all its audio: the recorder runs first and is queued)."""
         try:
-            self.engines.get(self.engines.decide(self.requested, "live"), "live")
+            self.engines.get_stream("live")            # the preview model first: a capture needs it at once
+        except Exception as e:                         # noqa: BLE001 - a capture falls back to the per-phrase decode
+            self.slog.error("live", f"preloading the streaming model failed: {type(e).__name__}: {e}")
+        try:
+            self.engines.get(self.engines.decide(self.requested, "live"), "live")     # the clean pass at stop
         except Exception as e:                         # noqa: BLE001 - a capture will fall back or report it
             self.slog.error("live", f"preloading the model failed: {type(e).__name__}: {e}")
 
@@ -295,15 +301,32 @@ class LiveApp(App):
         self.t_start = time.monotonic()
         self._set_recording(True)
         self.query_one("#log", RichLog).clear()
+        self._lines, self._partial_text = [], ""
         self._last("")
         self._show("stop")
         self._tick()
         self.session.on_phrase = lambda t: self._post(self._add_phrase, t)
+        self.session.on_partial = lambda t: self._post(self._set_partial, t)
         self.session.record_thread = threading.Thread(target=self._record_main, args=(self.session,), daemon=True)
         self.session.record_thread.start()
 
     def _add_phrase(self, text: str) -> None:
-        self.query_one("#log", RichLog).write(text)
+        self._lines.append(text)
+        self._render_live()
+
+    def _set_partial(self, text: str) -> None:
+        if self.phase == "recording":
+            self._partial_text = text
+            self._render_live()
+
+    def _render_live(self) -> None:
+        """The finished lines plus the line in progress (RichLog only appends, so it is redrawn)."""
+        log = self.query_one("#log", RichLog)
+        log.clear()
+        for t in self._lines:
+            log.write(t)
+        if self._partial_text:
+            log.write(self._partial_text)
 
     # ------------------------------------------------------------ record -> clean -> review
     def _record_main(self, session: LiveSession) -> None:
