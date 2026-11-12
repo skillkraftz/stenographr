@@ -56,7 +56,8 @@ class LiveResult:
 
 def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targets, on_sentence,
           before_end=None, stop_event: "threading.Event | None" = None, signals: bool = True,
-          finish: bool = True, keep_pcm: bool = False, engines: "Engines | None" = None) -> LiveResult:
+          finish: bool = True, keep_pcm: bool = False, engines: "Engines | None" = None,
+          preview: bool = False, on_partial=None) -> LiveResult:
     """Record from the mic and turn speech into sentences as the speaker pauses.
 
     The audio is kept: recorded at 48 kHz, channel 1 only, encoded to Ogg/Opus while recording (audio.py), and
@@ -65,7 +66,9 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
 
     The recorder starts FIRST and a thread keeps reading it, so the audio spoken while the model loads is
     queued, not lost. Every sentence goes to the session files at once, as `[HH:MM:SS] text` (recording start
-    + the sentence's offset into the audio), and to `on_sentence(text)` (no timestamp). SIGINT/SIGTERM (when
+    + the sentence's offset into the audio), and to `on_sentence(text)` (no timestamp). With `preview` (live only) the
+    sentences come from the streaming model (lowercase lines, `on_partial(text)` gets the line in progress), not from
+    the per-phrase Parakeet decode. SIGINT/SIGTERM (when
     `signals`) or `stop_event` finish the sentence in progress and end the recording. With `finish=False` the
     session block is left open (no end line) for the caller to add to. `before_end(texts)` may return problems
     (e.g. the clipboard failed) that go into the end line. Returns a LiveResult."""
@@ -124,16 +127,22 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
 
     stream = None
     try:
-        device = engines.decide(requested, name)
-        try:
-            stream = engines.get(device, name).stream()
-        except Exception as e:                           # noqa: BLE001
-            if device != "gpu":
-                raise
-            log.error(name, f"GPU engine failed, using CPU: {type(e).__name__}: {e}")
-            stream = engines.get("cpu", name).stream()
+        if preview:
+            try:
+                stream = engines.get_stream(name).stream()
+            except Exception as e:                       # noqa: BLE001 - no preview model: the per-phrase decode below
+                log.error(name, f"streaming preview model failed, using the per-phrase Parakeet decode: {type(e).__name__}: {e}")
+        if stream is None:
+            device = engines.decide(requested, name)
+            try:
+                stream = engines.get(device, name).stream()
+            except Exception as e:                       # noqa: BLE001
+                if device != "gpu":
+                    raise
+                log.error(name, f"GPU engine failed, using CPU: {type(e).__name__}: {e}")
+                stream = engines.get("cpu", name).stream()
 
-        stopping, down = False, Down3()
+        stopping, down, last_partial = False, Down3(), ""
         while True:
             if stop.is_set() and not stopping:
                 stopping = True                          # no more audio: stop the recorder (SIGTERM: pw-record flushes on it like on SIGINT, and it can never be inherited as ignored), drain what it sent
@@ -158,7 +167,12 @@ def _live(cfg, log: Log, requested: str, name: str, mode: str, where: str, targe
             if keep_pcm:
                 pcm.append(small)
             emit(stream.accept(small))
+            if on_partial and getattr(stream, "partial", last_partial) != last_partial:
+                last_partial = stream.partial
+                on_partial(last_partial)
         emit(stream.flush())                             # the sentence still in progress
+        if on_partial and last_partial:
+            on_partial("")
     except Exception as e:                               # noqa: BLE001
         log.error(name, f"{type(e).__name__}: {e}")
         status = daily.failed("engine failed" if stream is None else "transcription error")

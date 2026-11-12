@@ -130,6 +130,7 @@ class LiveSession:
         self.engines = engines                     # shared for the app's lifetime (None: one per capture)
         self.stop_event = threading.Event()
         self.on_phrase = None                      # callback(text), called from the recording thread
+        self.on_partial = None                     # callback(text): the line in progress (streaming preview)
         self.result: LiveResult | None = None
         self.clean_text = ""
         self.clean_failed = False
@@ -156,7 +157,7 @@ class LiveSession:
             self.result = _live(self.cfg, self.log, self.requested, NAME, "live", "unknown",
                                 [(daily.daily_path(self.cfg.archive, start), None)], self._phrase,
                                 stop_event=self.stop_event, signals=False, finish=False, keep_pcm=True,
-                                engines=self.engines)
+                                engines=self.engines, preview=True, on_partial=self._partial)
         except Exception as e:                     # noqa: BLE001
             self.log.error(NAME, f"recording failed: {type(e).__name__}: {e}")
             _fail_block(self.cfg, self.log, NAME, "live", "unknown", start, "recording failed")
@@ -166,6 +167,10 @@ class LiveSession:
     def _phrase(self, text: str) -> None:
         if self.on_phrase:
             self.on_phrase(text)
+
+    def _partial(self, text: str) -> None:
+        if self.on_partial:
+            self.on_partial(text)
 
     def request_stop(self) -> None:
         self.stop_event.set()

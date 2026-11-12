@@ -90,3 +90,49 @@ class FakeStream:
         out = [self._emit(self.have / SR)] if self.have > 0.5 * SR else []
         self.have = 0
         return out
+
+
+class FakeStreamEngine:
+    """Test stand-in for the streaming preview model: no model. Lines of FAKE_STREAM_STEP (default FAKE_ENGINE_SECONDS) s,
+    texts from FAKE_ENGINE_TEXT; while a line is in progress `partial` is its first word. FAKE_STREAM_FAIL=1: cannot load."""
+
+    def __init__(self):
+        if os.environ.get("FAKE_STREAM_FAIL") == "1":
+            raise RuntimeError("fake streaming model failure")
+        if os.environ.get("FAKE_STREAM_COUNT"):          # tests count constructions (= streaming model loads)
+            with open(os.environ["FAKE_STREAM_COUNT"], "a") as fh:
+                fh.write("stream\n")
+        time.sleep(float(os.environ.get("FAKE_STREAM_LOAD_DELAY", "0")))
+
+    def stream(self):
+        return FakeOnlineStream()
+
+
+class FakeOnlineStream:
+    def __init__(self):
+        self.step = float(os.environ.get("FAKE_STREAM_STEP") or os.environ.get("FAKE_ENGINE_SECONDS", "5"))
+        self.words = os.environ.get("FAKE_ENGINE_TEXT", "hello world|second line").split("|")
+        self.have = 0
+        self.t = 0.0
+        self.i = 0
+        self.partial = ""
+
+    def _text(self) -> str:
+        return self.words[self.i % len(self.words)]
+
+    def accept(self, audio: np.ndarray) -> list[dict]:
+        self.have += len(audio)
+        out = []
+        while self.have >= self.step * SR:
+            self.have -= int(self.step * SR)
+            out.append({"start": self.t, "end": self.t + self.step, "text": self._text()})
+            self.t += self.step
+            self.i += 1
+        self.partial = self._text().split()[0] if self.have > 0 else ""
+        return out
+
+    def flush(self) -> list[dict]:
+        out = [{"start": self.t, "end": self.t + self.have / SR, "text": self._text()}] if self.have > 0.5 * SR else []
+        self.have = 0
+        self.partial = ""
+        return out
