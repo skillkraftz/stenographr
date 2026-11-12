@@ -323,7 +323,4 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
   after a pull it says to restart them. It never stops or kills anything.
 
 ## Other decisions
-- Corrections file for mis-heard names: dropped (transcripts mostly go to AI, which infers meaning).
-  (changed 2026-11-09)
-- The CPU run used 4.9 GB of RAM, against about 800 MB for a comparable tool: later.
-  (changed 2026-11-09)
+Design decisions are one file each in `docs/decisions/` (index: `docs/DECISIONS.md`).
