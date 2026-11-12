@@ -1,5 +1,7 @@
 # stenographr
 
+@.hyperbeam/RULES.md
+
 Read SPEC.md before changing behaviour; update it when behaviour changes.
 
 Local speech-to-text (Python). Installed with `uv tool install --editable .` so `stenographr` is on PATH
@@ -29,11 +31,12 @@ without activating a venv. Runs locally; no network at runtime (models are downl
 | `src/stenographr/keybind.py` | The GNOME Ctrl+` keybinding (touches only its own entry) |
 | `src/stenographr/log.py` | `<archive>/steno.log` |
 | `SPEC.md` | The spec: layout, formats, what is built and what is open |
+| `docs/DECISIONS.md` | Design decisions, newest first: date, decision, why, what was rejected |
 | `tests/` | `run-tests.sh`; fakes in `tests/fakebin/` and, for `update` only, git/uv in `tests/fakeupd/` (nvidia-smi, ffmpeg (clip extraction and the Opus encoder), ffprobe, pw-record, pw-dump, wl-copy, xclip, wmctrl, gsettings, tmux, kitty) and a fake engine (offline + a fake streaming preview engine) |
 | `bench/` | Benchmark script (real data, outputs to /tmp only) |
 
 ## Tests
-`bash tests/run-tests.sh` (offline, no model, seconds). Fake `nvidia-smi` is first on PATH; the engine is a fake.
+`hyperbeam lab run --why "stenographr tests" -- bash tests/run-tests.sh` (all testing runs in the lab; offline, no model, seconds; no Docker, GPU or ports, so no exceptions). Fake `nvidia-smi` is first on PATH; the engine is a fake.
 New checks must fail on the code they guard.
 
 ## Rules
@@ -51,4 +54,6 @@ New checks must fail on the code they guard.
 ## Git workflow
 - One branch per task: `feat/`, `fix/` or `chore/<short-name>`. Commit, push, open a PR against `main` with `gh`.
 - Never commit directly to `main`. Never force-push `main`.
-- Always end the report with the branch name and the PR URL.
+- PR descriptions end with a short manual test checklist of real, runnable commands.
+- The final report follows RULES.md: branch, PR URL, what changed, what was tested and how, what is untested, what to test by hand.
+- Design decisions go in `docs/DECISIONS.md` (newest first); SPEC.md stays the behaviour spec.

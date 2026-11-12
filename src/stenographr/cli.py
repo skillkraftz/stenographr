@@ -163,9 +163,18 @@ def cmd_keybinding(args) -> int:
     return 0
 
 
+def _version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version("stenographr")
+    except PackageNotFoundError:      # run from source without an install
+        return "unknown"
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="stenographr", description="Local speech-to-text")
     ap.add_argument("--config", help="config file (default ~/.config/stenographr/config.toml)")
+    ap.add_argument("--version", action="version", version=f"stenographr {_version()}")
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("clip", help="transcribe video file(s) to .txt")
     c.add_argument("video", nargs="+")
