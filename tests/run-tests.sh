@@ -7,6 +7,11 @@ W=$(mktemp -d); trap 'jobs -p | xargs -r kill 2>/dev/null; pkill -f "$HERE/fakeb
 PY=${STENO_PY:-}
 [[ -z $PY && -x $(uv tool dir 2>/dev/null)/stenographr/bin/python ]] && PY=$(uv tool dir)/stenographr/bin/python
 [[ -z $PY ]] && PY=python3
+# no python with the deps (e.g. the lab): make $PROJECT/.venv once with uv (gitignored, kept between runs)
+if ! "$PY" -c 'import numpy, textual' 2>/dev/null && command -v uv >/dev/null; then
+  [[ -x $PROJECT/.venv/bin/python ]] || uv venv -q "$PROJECT/.venv"
+  uv pip install -q -p "$PROJECT/.venv/bin/python" numpy textual && PY=$PROJECT/.venv/bin/python
+fi
 "$PY" -c 'import numpy, textual' 2>/dev/null || { echo "need a python with numpy and textual (set STENO_PY)"; exit 2; }
 
 export PATH=$HERE/fakebin:$PATH PYTHONPATH=$PROJECT/src PYTHONDONTWRITEBYTECODE=1

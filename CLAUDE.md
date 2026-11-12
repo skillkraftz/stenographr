@@ -10,7 +10,7 @@ without activating a venv. Runs locally; no network at runtime (models are downl
 ## Layout
 | Path | What it is |
 |---|---|
-| `src/stenographr/cli.py` | `stenographr clip|srt` entry point |
+| `src/stenographr/cli.py` | `stenographr` entry point (clip, srt, notes, live, recall, keybinding, update, `--version`) |
 | `src/stenographr/config.py` | Defaults + `~/.config/stenographr/config.toml` overrides |
 | `src/stenographr/engines/` | Engine interface (`transcribe(audio) -> segments`) and implementations; `nemotron.py` = the streaming preview model of `live` (words while you talk) |
 | `src/stenographr/device.py` | CPU/GPU choice, checked before each file |
@@ -31,12 +31,13 @@ without activating a venv. Runs locally; no network at runtime (models are downl
 | `src/stenographr/keybind.py` | The GNOME Ctrl+` keybinding (touches only its own entry) |
 | `src/stenographr/log.py` | `<archive>/steno.log` |
 | `SPEC.md` | The spec: layout, formats, what is built and what is open |
-| `docs/DECISIONS.md` | Design decisions, newest first: date, decision, why, what was rejected |
+| `docs/decisions/` | One file per design decision (Decision / Why / Rejected); `docs/DECISIONS.md` is the generated index, never edited by hand |
 | `tests/` | `run-tests.sh`; fakes in `tests/fakebin/` and, for `update` only, git/uv in `tests/fakeupd/` (nvidia-smi, ffmpeg (clip extraction and the Opus encoder), ffprobe, pw-record, pw-dump, wl-copy, xclip, wmctrl, gsettings, tmux, kitty) and a fake engine (offline + a fake streaming preview engine) |
 | `bench/` | Benchmark script (real data, outputs to /tmp only) |
 
 ## Tests
-`hyperbeam lab run --why "stenographr tests" -- bash tests/run-tests.sh` (all testing runs in the lab; offline, no model, seconds; no Docker, GPU or ports, so no exceptions). Fake `nvidia-smi` is first on PATH; the engine is a fake.
+`hyperbeam lab run --why "stenographr tests" -- bash tests/run-tests.sh` (all testing runs in the lab; offline, no model; no Docker, GPU or ports, so no exceptions). Fake `nvidia-smi` is first on PATH; the engine is a fake.
+If no python with numpy and textual is found (the lab), `run-tests.sh` makes a gitignored `.venv` with uv. It is one sequential bash script (~90 s in the lab): its sections share fakes and state, so they run in order.
 New checks must fail on the code they guard.
 
 ## Rules
@@ -56,4 +57,4 @@ New checks must fail on the code they guard.
 - Never commit directly to `main`. Never force-push `main`.
 - PR descriptions end with a short manual test checklist of real, runnable commands.
 - The final report follows RULES.md: branch, PR URL, what changed, what was tested and how, what is untested, what to test by hand.
-- Design decisions go in `docs/DECISIONS.md` (newest first); SPEC.md stays the behaviour spec.
+- Design decisions go in their own file `docs/decisions/YYYY-MM-DD-slug.md` (format in `.hyperbeam/RULES.md`); never edit `docs/DECISIONS.md` (generated). SPEC.md stays the behaviour spec.
