@@ -174,8 +174,8 @@ timing, finish, errors).
 
 ## Tests
 
-`bash tests/run-tests.sh` (offline, no model; fake engine and fake `nvidia-smi`/`ffmpeg`/`ffprobe`).
-Agents run it through `hyperbeam lab run`; if no python with numpy and textual is found, it makes a `.venv` with uv.
+`hyperbeam stenographr test` (runs `bash tests/run-tests.sh` in the lab; offline, no model; fake engine and fake `nvidia-smi`/`ffmpeg`/`ffprobe`).
+If no python with numpy and textual is found, it makes a `.venv` with uv.
 
 ## Audio: fixed names for the two Scarlett 2i2s
 

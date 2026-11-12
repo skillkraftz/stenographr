@@ -32,6 +32,8 @@ without activating a venv. Runs locally; no network at runtime (models are downl
 | `src/stenographr/log.py` | `<archive>/steno.log` |
 | `SPEC.md` | The spec: layout, formats, what is built and what is open |
 | `docs/decisions/` | One file per design decision (Decision / Why / Rejected); `docs/DECISIONS.md` is the generated index, never edited by hand |
+| `IDEAS.md` | Open / Done ideas |
+| `docs/reviews/` | One record per review pass |
 | `tests/` | `run-tests.sh`; fakes in `tests/fakebin/` and, for `update` only, git/uv in `tests/fakeupd/` (nvidia-smi, ffmpeg (clip extraction and the Opus encoder), ffprobe, pw-record, pw-dump, wl-copy, xclip, wmctrl, gsettings, tmux, kitty) and a fake engine (offline + a fake streaming preview engine) |
 | `bench/` | Benchmark script (real data, outputs to /tmp only) |
 

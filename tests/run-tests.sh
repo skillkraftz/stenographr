@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Offline tests: fake engine, fake nvidia-smi/ffmpeg/ffprobe first on PATH. No model, GPU, network or /data.
+# Offline tests: fake engine and fake CLIs (tests/fakebin) first on PATH. No model, GPU, network or /data.
 HERE=$(dirname "$(readlink -f "$0")"); PROJECT=$(dirname "$HERE")
 W=$(mktemp -d); trap 'jobs -p | xargs -r kill 2>/dev/null; pkill -f "$HERE/fakebin/pw-record" 2>/dev/null; rm -rf "$W"' EXIT
 
-# python with numpy: $STENO_PY, else the uv tool venv, else system python
+# python with numpy and textual: $STENO_PY, else the uv tool venv, else system python, else a uv .venv (below)
 PY=${STENO_PY:-}
 [[ -z $PY && -x $(uv tool dir 2>/dev/null)/stenographr/bin/python ]] && PY=$(uv tool dir)/stenographr/bin/python
 [[ -z $PY ]] && PY=python3
