@@ -71,7 +71,35 @@ print("LENIENT:", r, s.phase, lg.w)
 os.environ["STENO_STRICT"] = "1"
 try: s.go(Phase.REVIEW); print("STRICT: no raise")
 except IllegalTransition: print("STRICT: raised", s.phase, len(lg.w))
+# 8. a failed delivery goes back to Review (all buttons, error in the status), the take stays; the next choice works
+class V2:
+    def __init__(self): self.st = []; self.b = []; self.exited = False
+    def status(self, t): self.st.append(t)
+    def buttons(self, *ids): self.b.append(ids)
+    def exit(self): self.exited = True
+    def last(self, t): pass
+    def clear_log(self): pass
+class FS:
+    done = False
+    def __init__(self, fail): self.fail = list(fail)
+    def text(self): return "hello"
+    def deliver(self, choice, name=None, pane=None):
+        return "FAILED: " + self.fail.pop(0) if self.fail else "ok · " + choice
+for first in ("copy", "send"):
+    v = V2(); f = LiveFlow(cfg, log, "cpu", True, v); f.session = FS(["x failed, see steno.log"])
+    f.state.go(Phase.RECORDING); f.state.go(Phase.CLEANING); f.state.go(Phase.REVIEW)
+    f.claude_default, f.claude_pane = "alpha", "%0"
+    if first == "copy": f.on_yes()
+    else: f.on_claude("send")
+    print(f"FAILED-{first}:", f.phase, v.b[-1], "x failed" in v.st[-1], f.session is not None, v.exited)
+    f.on_yes()                                     # Copy after the failure works
+    print(f"RETRY-{first}:", v.exited, f.session)
+tk = V2(); f = LiveFlow(cfg, log, "cpu", True, tk); f.state.go(Phase.RECORDING); f.tick()
+print("QESC-REC:", "q/Esc disabled until Stop" in tk.st[-1])
 PY
+check "failed Copy returns to Review with all buttons, error in the status, take kept; a retry then delivers" 'grep -qx "FAILED-copy: review (.copy., .append., .send., .close.) True True False" "$W/st.out" && grep -qx "RETRY-copy: True None" "$W/st.out"'
+check "failed Send returns to Review with all buttons; Copy afterwards works" 'grep -qx "FAILED-send: review (.copy., .append., .send., .close.) True True False" "$W/st.out" && grep -qx "RETRY-send: True None" "$W/st.out"'
+check "while recording the status says q/Esc are disabled until Stop" 'grep -qx "QESC-REC: True" "$W/st.out"'
 check "table: every transition outside TRANSITIONS raises and leaves the phase alone, every one inside works; error is the end" 'grep -qx "TABLE-BAD: \[\]" "$W/st.out" && grep -qx "ERROR-IS-THE-END: True" "$W/st.out"'
 check "the loop path and the popup path (incl. picking and error) are allowed; no phase can be skipped" 'grep -qx "PATHS: ok" "$W/st.out" && grep -qx "NO-SKIP: True" "$W/st.out"'
 check "partial updates are taken while recording and stopping only" '[[ $(grep -c "^PARTIAL-.*: taken want taken$" "$W/st.out") == 2 && $(grep -c "^PARTIAL-.*: ignored want ignored$" "$W/st.out") == 4 ]]'

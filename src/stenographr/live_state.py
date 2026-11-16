@@ -9,7 +9,7 @@ with (a crash loses their words).
   ready -> notice | recording | ready (cannot record: back to ready with a message)
   notice -> ready | recording | error
   recording -> stopping | cleaning | error          stopping -> cleaning | error
-  cleaning -> review                                 review -> ready | picking | error
+  cleaning -> review                                 review -> review (a failed delivery) | ready | picking | error
   picking -> review                                  error: the end (Close)
 A popup never visits `ready`; Close / any popup choice exits the app from `review`, `ready` or `error`.
 """
@@ -43,7 +43,7 @@ TRANSITIONS: dict[Phase, frozenset[Phase]] = {
     P.RECORDING: frozenset({P.STOPPING, P.CLEANING, P.ERROR}),
     P.STOPPING: frozenset({P.CLEANING, P.ERROR}),
     P.CLEANING: frozenset({P.REVIEW}),
-    P.REVIEW: frozenset({P.READY, P.PICKING, P.ERROR}),
+    P.REVIEW: frozenset({P.REVIEW, P.READY, P.PICKING, P.ERROR}),
     P.PICKING: frozenset({P.REVIEW}),
     P.ERROR: frozenset(),
 }

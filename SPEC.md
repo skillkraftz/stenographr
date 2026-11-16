@@ -220,8 +220,10 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
     30 s cap, neighbouring segments merged into chunks of up to ~30 s and cut only at the longest pauses, each chunk
     decoded in one go. That keeps sentences whole (the live stream cuts at every 0.6 s pause and loses context: "is
     Only Acceptable to use. when the work will grow." becomes one sentence). About 0.03 x realtime on CPU or GPU; a 30 s
-    chunk needs ~1.2 GB of VRAM at most, and the GPU->CPU fallback applies as everywhere. If delivery fails the text
-    stays on screen and the end line says FAILED.
+    chunk needs ~1.2 GB of VRAM at most, and the GPU->CPU fallback applies as everywhere. If a Copy, Append or Send fails
+    the screen returns to Review (error in the status line, all buttons, the Ctrl+` popup too), the take stays and no end
+    line is written yet: retry or use another button; the end line comes with the eventual choice (or the window closing).
+    While recording or cleaning the status line says q/Esc are disabled.
   - **Claude: append and send** (two buttons, replacing "Send to Claude"). The target is hyperbeam's Claude pane, found in
     this order (`tmuxsend.choose_target`, plain `tmux`, no hyperbeam code):
     1. `HB_CLAUDE_PANE` (a pane id like `%12`, set by hyperbeam in every project session) in our own environment;
