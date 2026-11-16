@@ -23,7 +23,8 @@ nstart "$ND" FAKE_PW_CHUNKS=1 FAKE_ENGINE_TEXT="again"; nwait 1; nstop
 check "second session, same day and folder: header still only once, 2 blocks" '[[ $(grep -c "^stenographr notes ·" "$NF") == 1 && $(grep -c "^start:" "$NF") == 2 && $(grep -c "^end:" "$NF") == 2 ]]'
 check "notes outside a git repo: only the steno file is created" '[[ $(ls -A "$ND") == "steno-$(date +%F).txt" ]]'
 check "steno.log: start, device, finish" 'grep -q " notes start: " "$LOG" && grep -q " notes device: " "$LOG" && grep -q " notes finish: 1 sentences, ok" "$LOG"'
-dfresh; mkdir -p "$W/empty"; (cd "$W/empty" && FAKE_MIC_MISSING=1 steno notes 2>/dev/null); echo $? > "$W/rc"
+dfresh; mkdir -p "$W/empty"; (cd "$W/empty" && FAKE_MIC_MISSING=1 steno notes 2>"$W/err"); echo $? > "$W/rc"
+check "notes, mic missing: the message names the config key and where to find mic names" 'grep -q "mic scarlett-mic not found" "$W/err" && grep -q "\[dictation\]" "$W/err" && grep -q "config.toml" "$W/err" && grep -q "pw-dump" "$W/err"'
 check "notes, mic missing: exit 1, FAILED block in the daily file only" '[[ $(cat "$W/rc") == 1 && ! -e $W/pw.log ]] && grep -q "FAILED: mic scarlett-mic not found" "$DAILY" && ! ls "$W/empty"/steno-*.txt >/dev/null 2>&1'
 dfresh; mkdir -p "$W/gate"; nstart "$ND" FAKE_ENGINE_LOAD_DELAY=1.2 FAKE_ENGINE_TEXT="one|two|three"; nwait 3 120; nstop
 check "notes: audio that arrived while the model loaded is not lost" '[[ $(cat "$W/notes.out") == "$(printf "one\ntwo\nthree")" ]]'

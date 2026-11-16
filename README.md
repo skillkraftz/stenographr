@@ -12,14 +12,14 @@ uv tool install --editable .          # CPU only; `stenographr` lands on PATH
 uv tool install --editable ".[gpu]"   # + CUDA 13 sherpa-onnx and NVIDIA libs (~1.6 GB of wheels, no sudo)
 ```
 
-Models are downloaded once, by hand, into `~/.local/share/stenographr/models`:
+Models are downloaded once into `~/.local/share/stenographr/models` (the only step that needs the network):
 
 ```sh
-cd ~/.local/share/stenographr/models
-curl -LO https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
-curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2 | tar xj
-curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25.tar.bz2 | tar xj   # live preview, ~0.5 GB download
+scripts/get-models.sh          # VAD, Parakeet, and the Nemotron live-preview model
+scripts/get-models.sh DIR      # another folder (if [paths] models is set in the config); -y skips the question
 ```
+
+It prints each download's size, skips what is already there and asks before downloading.
 
 ## Use
 
@@ -74,7 +74,7 @@ Samsung file name (`YYYYMMDD_HHMMSS`, any suffix), else `--recorded-at`, else th
 ## Dictation
 
 Needs `pw-record`, `ffmpeg` (libopus), `wl-copy`, `kitty` (for the shortcut), `tmux` (only for the Claude buttons); records from the PipeWire node `scarlett-mic`
-(see the audio section below), channel 1. Suggested aliases:
+(see [docs/audio-setup.md](docs/audio-setup.md)), channel 1. Suggested aliases:
 
 ```sh
 alias steno='stenographr notes'
@@ -177,29 +177,4 @@ timing, finish, errors).
 `hyperbeam stenographr test` (runs `bash tests/run-tests.sh` in the lab; offline, no model; fake engine and fake `nvidia-smi`/`ffmpeg`/`ffprobe`).
 If no python with numpy and textual is found, it makes a `.venv` with uv.
 
-## Audio: fixed names for the two Scarlett 2i2s
-
-`system/wireplumber/51-scarletts.conf` is a WirePlumber 1.x rule file (not part of the Python package). The two
-identical Scarlett 2i2s on the dock report the same serial, so WirePlumber told them apart only by a `.2` suffix
-that depended on detection order, and after a replug the mic card could end up with no input. The file matches on
-the USB product ID instead (the two cards are different models):
-
-| Product ID | Card | Becomes |
-|---|---|---|
-| 1235:8016 | mic 2i2 (dock port 3.1.1) | device `scarlett-mic`, Pro Audio, input node `scarlett-mic` ("Scarlett mic"), default input via `priority.session` |
-| 1235:8202 | main 2i2 (dock port 3.3.1) | device `scarlett-main`, profile HiFi, stays the default output |
-
-Install (user config only, no sudo):
-
-```sh
-mkdir -p ~/.config/wireplumber/wireplumber.conf.d
-ln -s ~/projects/stenographr/system/wireplumber/51-scarletts.conf ~/.config/wireplumber/wireplumber.conf.d/
-systemctl --user restart wireplumber
-```
-
-WirePlumber keys its saved settings (`~/.local/state/wireplumber/`) by device name, so after the rename any
-old entries for `alsa_card.usb-Focusrite_Scarlett_2i2_USB-00[.2]` are stale; rename or remove them (and, if
-you pick a default by hand, run `wpctl set-default` once). Check with `wpctl status`.
-
-Undo: `rm ~/.config/wireplumber/wireplumber.conf.d/51-scarletts.conf`, then restart wireplumber. The match is the model, not the port, so the cards can move between dock ports;
-it stops working if both cards are the same model (`lsusb | grep 1235` shows the IDs).
+The two Scarlett 2i2s need fixed PipeWire names (`scarlett-mic`); the WirePlumber rule and its install are in [docs/audio-setup.md](docs/audio-setup.md).

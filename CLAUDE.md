@@ -9,6 +9,7 @@ downloaded once, by hand). Read the SPEC.md section for what you change, and upd
 ## Which file holds what
 | Path | What it is |
 |---|---|
+| `src/stenographr/__init__.py` | Package marker (no code) |
 | `src/stenographr/cli.py` | Entry point: clip, srt, notes, live, recall, keybinding, update, `--version` |
 | `src/stenographr/config.py` | Defaults + `~/.config/stenographr/config.toml` overrides |
 | `src/stenographr/engines/` | Engine interface (`transcribe(audio) -> segments`) and implementations; `nemotron.py` is the streaming preview model of `live` |
@@ -24,12 +25,14 @@ downloaded once, by hand). Read the SPEC.md section for what you change, and upd
 | `src/stenographr/record.py`, `audio.py` | `pw-record` command and mic checks; session Opus audio |
 | `src/stenographr/tmuxsend.py`, `clipboard.py`, `registry.py` | Send into the Claude pane; `wl-copy`; the one-recorder-at-a-time registry |
 | `src/stenographr/keybind.py`, `update.py`, `log.py` | GNOME Ctrl+` binding; `update`; `<archive>/steno.log` |
+| `scripts/get-models.sh` | Downloads the three models (VAD, Parakeet, Nemotron): sizes, skips what exists, asks first; the only network use |
+| `docs/audio-setup.md` | Scarlett/WirePlumber setup |
 | `SPEC.md` | Behaviour spec: layout, formats, what is built and open |
 | `docs/decisions/` | One file per design decision; `docs/DECISIONS.md` is its generated index, never edited by hand |
 | `IDEAS.md` | Open / Done ideas |
 | `tests/` | `run-tests.sh` (runs `tests/sections/*.sh` in parallel; helpers in `lib.sh`, `lib-dictation.sh`); fakes in `tests/fakebin/` (and `tests/fakeupd/` for `update`) plus a fake engine |
 | `bench/` | Benchmark script (real data, outputs to /tmp only) |
-| `system/wireplumber/` | WirePlumber rule for the two Scarlett interfaces (see README) |
+| `system/wireplumber/` | WirePlumber rule for the two Scarlett interfaces (setup in `docs/audio-setup.md`) |
 
 ## Tests
 `hyperbeam lab run --why "stenographr tests" -- bash tests/run-tests.sh`. Offline: no model, GPU, network, Docker, ports,

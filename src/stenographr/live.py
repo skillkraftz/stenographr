@@ -27,6 +27,7 @@ from pathlib import Path
 from . import daily, registry, tmuxsend
 from .dictate import LiveResult, _copy, _fail_block, _live
 from .log import Log
+from .config import mic_hint
 from .record import SR, mic_exists
 from .runner import Engines, transcribe_audio
 
@@ -60,7 +61,7 @@ class LiveSession:
         now = dt.datetime.now()
         _fail_block(self.cfg, self.log, NAME, "live", "unknown", now, f"mic {self.cfg.mic} not found")
         self.done = True
-        return f"mic {self.cfg.mic} not found"
+        return f"mic {self.cfg.mic} not found. {mic_hint(self.cfg.mic)}"
 
     # -- record (blocking; runs in a thread)
     def record(self) -> LiveResult | None:

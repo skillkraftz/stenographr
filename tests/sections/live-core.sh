@@ -66,7 +66,7 @@ runcore 's = start(); wait(lambda: s.phrases == ["one"]); go(2); go(3); wait(lam
 check "Close: nothing is delivered, end line says closed" '[[ ! -e $W/clip ]] && grep -qx "STATUS: ok · closed" "$W/core.out" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok · closed$"'
 dfresh; mkdir -p "$W/gate"
 FAKE_MIC_MISSING=1 runcore 's = LiveSession(cfg, log, "cpu"); print("PRE:", s.preflight())' > "$W/core.out" 2>&1
-check "mic missing: nothing recorded, daily block FAILED: mic scarlett-mic not found, no audio" 'grep -qx "PRE: mic scarlett-mic not found" "$W/core.out" && [[ ! -e $W/pw.log && ! -e $A/audio ]] && grep -qE "^start: $BLK · live · unknown$" "$DAILY" && grep -qE "^end: $BLK · [0-9]+s · FAILED: mic scarlett-mic not found, see steno.log$" "$DAILY"'
+check "mic missing: nothing recorded, daily block FAILED: mic scarlett-mic not found, no audio" 'grep -qE "^PRE: mic scarlett-mic not found\. Set .mic = .*\[dictation\].*config\.toml; list the names with: pw-dump" "$W/core.out" && [[ ! -e $W/pw.log && ! -e $A/audio ]] && grep -qE "^start: $BLK · live · unknown$" "$DAILY" && grep -qE "^end: $BLK · [0-9]+s · FAILED: mic scarlett-mic not found, see steno.log$" "$DAILY"'
 dfresh; mkdir -p "$W/gate"; export FAKE_FF_ENC_FAIL=1
 runcore 's = start(); wait(lambda: s.phrases == ["one"]); go(2); go(3); wait(lambda: len(s.phrases) == 3); s.request_stop(); s.record_thread.join(10); s.clean(); print("STATUS:", s.deliver("copy"))' > "$W/core.out" 2>&1
 check "encoder fails: the session still runs and delivers (clipboard set)" '[[ -s $W/clip ]] && grep -q "^STATUS:" "$W/core.out"'

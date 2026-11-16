@@ -73,8 +73,17 @@ def _transcribe_one(cfg, log: Log, engines: Engines, video: Path, out_dir: Path,
     print(p1)
 
 
+def _archive_ok(cfg) -> bool:
+    problem = configmod.archive_problem(cfg)
+    if problem:
+        print(f"stenographr: {problem}", file=sys.stderr)
+    return problem is None
+
+
 def cmd_clip(args) -> int:
     cfg = configmod.load(args.config)
+    if not _archive_ok(cfg):
+        return 1
     log = Log(cfg.archive / "steno.log")
     engines = Engines(cfg, log)
     failed = 0
@@ -127,11 +136,15 @@ def cmd_live(args) -> int:
     cfg, log = _cfg_log(args)
     if args.toggle:
         return popup.toggle(cfg, log, args.config)
+    if not _archive_ok(cfg):
+        return 1
     return livemod.run(cfg, log, args.device or _dictation_device(cfg), popup=args.popup, headless=args.headless)
 
 
 def cmd_notes(args) -> int:
     cfg, log = _cfg_log(args)
+    if not _archive_ok(cfg):
+        return 1
     return dictate.notes(cfg, log, args.device or _dictation_device(cfg))
 
 
