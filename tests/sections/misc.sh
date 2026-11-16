@@ -108,5 +108,21 @@ nstart "$W/nn" FAKE_PW_CHUNKS=1 FAKE_ENGINE_TEXT="again"; nwait 1; nstop
 check "notes is unchanged: it never loads the streaming model, its lines come from the per-phrase decode" '[[ $(cat "$W/notes.out") == again ]] && [[ ! -s $W/scount ]] && ! grep -q "stream engine" "$LOG"'
 unset FAKE_STREAM_COUNT
 
+echo "== archive not writable"; dfresh
+: > "$W/afile"; printf '[paths]\narchive = "%s/afile/sub"\n[engine]\nname = "fake"\n' "$W" > "$W/bad.toml"
+mkdir -p "$W/an"; (cd "$W/an" && steno --config "$W/bad.toml" notes 2>"$W/err"); echo $? > "$W/rc"
+check "notes, archive not writable: exit 1, names [paths] archive and the config file, no recording" '[[ $(cat "$W/rc") == 1 && ! -e $W/pw.log ]] && grep -q "archive folder .*/afile/sub is not writable" "$W/err" && grep -q "archive = .* under \[paths\] in .*config.toml" "$W/err"'
+V=$(mkvid a.mp4); steno --config "$W/bad.toml" clip "$V" 2>"$W/err"; echo $? > "$W/rc"
+check "clip, archive not writable: exit 1 with the same message, no transcript written" '[[ $(cat "$W/rc") == 1 && ! -e ${V%.mp4}.txt ]] && grep -q "is not writable" "$W/err"'
+mkconf ""
+
+echo "== scripts/get-models.sh"
+M=$W/models-t; mkdir -p "$M/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8" "$M/sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25"; : > "$M/silero_vad.onnx"
+bash "$PROJECT/scripts/get-models.sh" "$M" </dev/null > "$W/gm.out" 2>&1; echo $? > "$W/rc"
+check "get-models: everything present -> skips all, nothing to download, exit 0 (no network needed)" '[[ $(cat "$W/rc") == 0 ]] && [[ $(grep -c "^  have " "$W/gm.out") == 3 ]] && grep -q "nothing to download" "$W/gm.out"'
+rmdir "$M/sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25"
+mkdir -p "$W/nocurl"; printf '#!/bin/sh\necho "fake curl: no network in tests" >&2; exit 6\n' > "$W/nocurl/curl"; chmod +x "$W/nocurl/curl"
+PATH=$W/nocurl:$PATH bash "$PROJECT/scripts/get-models.sh" "$M" </dev/null > "$W/gm.out" 2>&1; echo $? > "$W/rc"
+check "get-models: something missing and no terminal -> refuses to download without -y (exit 1, nothing downloaded)" '[[ $(cat "$W/rc") == 1 ]] && grep -q "missing  nemotron" "$W/gm.out" && grep -q "rerun with -y" "$W/gm.out" && [[ ! -e $M/sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25 ]]'
 
 echo; echo "$pass passed, $fail failed"; [[ $fail == 0 ]]

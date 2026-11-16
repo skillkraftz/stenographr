@@ -61,3 +61,22 @@ def load(path: str | os.PathLike | None = None) -> Config:
                 v = Path(os.path.expanduser(v))
             setattr(cfg, k, v)
     return cfg
+
+
+def archive_problem(cfg: Config) -> str | None:
+    """A message (two lines) if the archive folder can't be created or written, else None."""
+    try:
+        cfg.archive.mkdir(parents=True, exist_ok=True)
+        ok = os.access(cfg.archive, os.W_OK | os.X_OK)
+    except OSError:
+        ok = False
+    if ok:
+        return None
+    return (f"the archive folder {cfg.archive} is not writable.\n"
+            f"  Set `archive = \"/some/folder\"` under [paths] in {DEFAULT_PATH} (or fix the folder's permissions).")
+
+
+def mic_hint(mic: str) -> str:
+    """Where to go when the mic node is missing (printed after "mic X not found")."""
+    return (f"Set `mic = \"<node name>\"` under [dictation] in {DEFAULT_PATH}; "
+            f"list the names with: pw-dump | grep node.name")

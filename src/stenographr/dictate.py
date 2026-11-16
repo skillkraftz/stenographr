@@ -22,6 +22,7 @@ import numpy as np
 from . import audio as audiomod
 from . import clipboard, daily
 from .log import Log
+from .config import mic_hint
 from .record import Down3, channel_of, mic_exists, recorder_cmd
 from .runner import Engines
 
@@ -241,7 +242,7 @@ def notes(cfg, log: Log, requested: str) -> int:
     if not mic_exists(cfg.mic):
         log.error(name, f"mic {cfg.mic} not found: nothing recorded")
         _fail_block(cfg, log, name, "notes", str(cwd), start, f"mic {cfg.mic} not found")
-        print(f"stenographr: mic {cfg.mic} not found", file=sys.stderr)
+        print(f"stenographr: mic {cfg.mic} not found.\n  {mic_hint(cfg.mic)}", file=sys.stderr)
         return 1
     root = _repo_root()
     if root:                                             # in a git work tree: <repo root>/steno/, ignored by git
