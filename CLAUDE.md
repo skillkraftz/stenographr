@@ -23,15 +23,19 @@ downloaded once, by hand). Read the SPEC.md section for what you change, and upd
 | `SPEC.md` | Behaviour spec: layout, formats, what is built and open |
 | `docs/decisions/` | One file per design decision; `docs/DECISIONS.md` is its generated index, never edited by hand |
 | `IDEAS.md` | Open / Done ideas |
-| `tests/` | `run-tests.sh`; fakes in `tests/fakebin/` (and `tests/fakeupd/` for `update`) plus a fake engine |
+| `tests/` | `run-tests.sh` (runs `tests/sections/*.sh` in parallel; helpers in `lib.sh`, `lib-dictation.sh`); fakes in `tests/fakebin/` (and `tests/fakeupd/` for `update`) plus a fake engine |
 | `bench/` | Benchmark script (real data, outputs to /tmp only) |
 | `system/wireplumber/` | WirePlumber rule for the two Scarlett interfaces (see README) |
 
 ## Tests
 `hyperbeam lab run --why "stenographr tests" -- bash tests/run-tests.sh`. Offline: no model, GPU, network, Docker, ports,
 `/data` or real config/archive; fakes are first on PATH and never touch real GNOME settings, clipboard, tmux, kitty or PipeWire.
-If no python with numpy and textual is found, the script makes a gitignored `.venv` with uv. It is one sequential
-bash script (~90 s): its sections share fakes and state, so they run in order (this is why it is not run in parallel).
+If no python with numpy and textual is found, the script makes a gitignored `.venv` with uv.
+One file per section in `tests/sections/` (own temp dir, fakes and registry; shared helpers in `tests/lib.sh`, and
+`tests/lib-dictation.sh` for the live/notes sections). `run-tests.sh` runs them all in parallel (~25 s), prints each
+section's result and exits 1 listing the failed sections. Run one alone with `tests/run-tests.sh live-ui` (output live;
+`env STENO_TEST_DEBUG=1` adds the daily file, ui output and log tail on a failure). A new section is a new file there;
+sections must not depend on each other's state.
 New checks must fail on the code they guard.
 
 ## Rules (details in SPEC.md)
