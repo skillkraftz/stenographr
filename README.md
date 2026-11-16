@@ -1,180 +1,118 @@
 # stenographr
 
-Local speech-to-text. Runs entirely on this machine; nothing is uploaded.
+Local speech-to-text for Linux: dictate into a clipboard or a Claude Code pane, keep notes, transcribe video clips. Nothing leaves the machine.
 
-Engine: NVIDIA Parakeet TDT 0.6B v2 (int8) through [sherpa-onnx](https://k2-fsa.github.io/sherpa/onnx/),
-with Silero VAD to cut long recordings into utterances. CPU or GPU, chosen per file.
+![A live session: Ready, Start, words appear, Stop, clean text, Copy](docs/img/live.gif)
+
+Engines: NVIDIA Parakeet TDT 0.6B v2 (int8) through [sherpa-onnx](https://k2-fsa.github.io/sherpa/onnx/) with Silero VAD;
+the live preview uses the Nemotron streaming model. CPU or GPU.
 
 ## Install
 
 ```sh
 uv tool install --editable .          # CPU only; `stenographr` lands on PATH
 uv tool install --editable ".[gpu]"   # + CUDA 13 sherpa-onnx and NVIDIA libs (~1.6 GB of wheels, no sudo)
+scripts/get-models.sh                 # VAD, Parakeet and the live-preview model into ~/.local/share/stenographr/models
 ```
 
-Models are downloaded once into `~/.local/share/stenographr/models` (the only step that needs the network):
+`get-models.sh` is the only step that needs the network; it prints sizes, skips what exists and asks first (`DIR` = another
+folder, `-y` = no question). Dictation needs `pw-record`, `ffmpeg` (libopus), `wl-copy`, `kitty` (for the shortcut) and `tmux` (Claude buttons).
+The mic is a fixed PipeWire name, `scarlett-mic` ([docs/audio-setup.md](docs/audio-setup.md)).
+
+## Quick start
 
 ```sh
-scripts/get-models.sh          # VAD, Parakeet, and the Nemotron live-preview model
-scripts/get-models.sh DIR      # another folder (if [paths] models is set in the config); -y skips the question
+stenographr live            # press Start (Enter), talk, Stop (s), Copy (y), paste anywhere
+stenographr keybinding install   # Ctrl+` opens a popup that records at once
 ```
 
-It prints each download's size, skips what is already there and asks before downloading.
+## live
 
-## Use
+A [Textual](https://textual.textualize.io/) screen. It shows each phrase as you speak (lowercase, no punctuation); when you stop it
+re-transcribes the whole take for proper sentences. **Copy** puts the text on the clipboard (plus a trailing space), **Append** and **Send**
+type it into the Claude Code pane of the tmux session. Only one instance records at a time; the model loads once per app.
+It adapts to the pane size (a tall narrow sidebar works):
+
+![80x24 live screen, review step](docs/img/live-review-80x24.png)
+
+| | Ready | Recording | Review |
+|---|---|---|---|
+| 85x12 | ![](docs/img/live-ready-85x12.png) | ![](docs/img/live-recording-85x12.png) | ![](docs/img/live-review-85x12.png) |
+| 40x30 | ![](docs/img/live-ready-40x30.png) | ![](docs/img/live-recording-40x30.png) | ![](docs/img/live-review-40x30.png) |
+
+**Append** types the text and a space, no Enter, so you can add several takes. **Send** types the text and presses Enter.
+**Send is the only place stenographr ever presses Enter.**
+
+| after Append (text waits in the input) | after Send (submitted) |
+|---|---|
+| ![](docs/img/pane-append.png) | ![](docs/img/pane-send.png) |
+
+Every capture is a session block in the daily file with its audio (`<archive>/audio/*.opus`, never deleted). Details: [SPEC.md](SPEC.md).
+
+## notes
+
+`stenographr notes` (alias `steno`) dictates in the terminal until Ctrl+C: each sentence is printed and appended at once to
+`steno-YYYY-MM-DD.txt` (in a git repo: `<repo root>/steno/`, added to `.gitignore`) and to the daily file. Timestamps go only into those files.
+
+![notes: terminal and the resulting file](docs/img/notes-session.png)
+
+## recall
+
+`stenographr recall [N]` lists the newest pieces of the day (sessions, clips) and copies the one you pick; `recall 2` copies piece 2.
+
+![recall](docs/img/recall.png)
+
+## clip
 
 ```sh
-stenographr clip VIDEO... [--out DIR] [--recorded-at "YYYY-MM-DD HH:MM"] [--device cpu|gpu|auto]
-stenographr srt FILE.txt              # writes FILE.srt next to it (replaces an existing one; never automatic)
-stenographr --version
-stenographr update                    # from any directory: git pull --ff-only the source checkout (see below)
-```
+$ stenographr clip 20261109_083630.mp4
+/home/me/videos/20261109_083630.txt
+$ cat 20261109_083630.txt
+# 20261109_083630 · recorded 2026-11-09 08:36 · 00:25:15
+source: /home/me/videos/20261109_083630.mp4
+engine: parakeet-tdt-0.6b-v2-int8 (gpu) · transcribed 2026-11-09 08:37
 
-`update` prints the source path, branch, commit and how far it is ahead/behind `origin` (after a `git fetch`). It only
-pulls when the checkout is on a clean `main` (never stashes, resets or switches branches), reruns
-`uv tool install --editable ".[gpu]" --force` if `pyproject.toml` changed, and ends by listing the running
-`stenographr live` instances (pid, popup or tmux pane) that need a restart. It never stops them.
-
-`clip` writes `DIR/<basename>.txt` (default `DIR`: the video's own folder) and an archive copy (flat folders, easy to
-prune by hand):
-
-- Samsung name: `<archive>/clips/clip-YYYY-MM-DD-HHMMSS<suffix>.txt`, the suffix being whatever follows the timestamp
-  (`20251127_155055_001.mp4` -> `clip-2025-11-27-155055_001.txt`).
-- Anything else: `<archive>/other/YYYY-MM-DD-<stem>.txt` (`some-talk.mp4` -> `other/<recording date>-some-talk.txt`).
-
-A source file gets at most one transcript: if either file already exists, that video is refused (the message gives
-the `rm` command to redo it), the other videos still run, and the exit code is 1. Nothing is ever overwritten. A
-video with no audio stream gets a normal `.txt` whose only line is `(no audio)` (so it counts as done); one with audio
-but no speech gets the header and no lines. The model is loaded once per run, however many videos are given.
-(`srt` is the exception: it replaces an existing `.srt`.)
-
-Every file `clip` handles also adds one line to the day's manifest, `<archive>/steno-YYYY-MM-DD.txt` (today's date,
-append only):
-
-```
+[00:00:00 → 00:00:03 | 08:36:30] Remind me to book the venue.
+$ cat /data/transcripts/steno-2026-11-09.txt        # the daily manifest, one line per file
 clip: 2026-11-09 08:37:05 · 20261109_083630 → clips/clip-2026-11-09-083630.txt
-other: 2026-11-09 09:10:00 · some-talk → other/2026-11-08-some-talk.txt
-clip: 2026-11-09 08:40:00 · 20261109_090000 · FAILED: see steno.log
-clip: 2026-11-09 08:41:00 · 20261109_083630 · refused: already transcribed
 ```
 
-The design is in [SPEC.md](SPEC.md). Transcript format:
+`--out DIR`, `--recorded-at "YYYY-MM-DD HH:MM"` and `--device cpu|gpu|auto` are optional. One transcript per video: if it exists the video is
+refused with the `rm` to redo it (exit 1), nothing is overwritten. A video without audio gets `(no audio)`. The GPU is used only when it is free enough; otherwise CPU.
 
-```
-# 20261108_063820 · recorded 2026-11-08 06:38 · 00:25:15
-source: /path/to/20261108_063820.mp4
-engine: parakeet-tdt-0.6b-v2-int8 (gpu) · transcribed 2026-11-08 10:17
+## srt
 
-[00:00:00 → 00:00:03 | 06:38:20] Alright, it's Sunday, November eighth.
-```
+`stenographr srt FILE.txt` writes `FILE.srt` next to it (replacing an existing one; never automatic).
 
-The first two times are offsets into the video, the third is time of day. Recording start comes from a
-Samsung file name (`YYYYMMDD_HHMMSS`, any suffix), else `--recorded-at`, else the file's mtime.
+## keybinding
 
-## Dictation
+`stenographr keybinding install` adds the GNOME shortcut Ctrl+` = `stenographr live --toggle`; `remove` deletes only that entry.
+It is global, so it takes Ctrl+` from apps that use it.
 
-Needs `pw-record`, `ffmpeg` (libopus), `wl-copy`, `kitty` (for the shortcut), `tmux` (only for the Claude buttons); records from the PipeWire node `scarlett-mic`
-(see [docs/audio-setup.md](docs/audio-setup.md)), channel 1. Suggested aliases:
+## update
 
-```sh
-alias steno='stenographr notes'
-alias recall='stenographr recall'
-```
-
-- `stenographr live`: a Textual screen that never types, except the Append and Send buttons. It shows each phrase as you speak (and
-  appends it to the daily file), and when you stop it re-transcribes the whole session in one pass to get whole
-  sentences. Two kinds of instance, and several can be open at once:
-  - **Loop** (`stenographr live` in a terminal or tmux pane): opens on **Ready** (mic closed). **Start** (Enter or `r`) ->
-    recording -> **Stop** (`s`) -> clean text with **Copy (y)** (clipboard plus a trailing space, back to Ready), **Claude append (a)**
-    (types the text plus a space into that tmux session's Claude Code input, no Enter, so you can append several takes) and
-    **Claude send (e)** (types the text and presses Enter: submits everything in the input; the only Enter stenographr ever sends);
-    both back to Ready. The session's name is at the right end of the blue bar. **New (r)**
-    (nothing delivered, back to Ready) and **Close (q / Esc)**. Ready shows "Last: sent to claude alpha · 22:14". The model
-    loads once per app. Each capture is its own session block and audio file.
-  - **Popup** (opened by Ctrl+`, which runs `stenographr live --toggle`): a kitty window, 80x25, that records at once;
-    Stop gives **Copy**, **Claude append**, **Claude send** and **Close**, then the window closes. Ctrl+` while a popup is recording stops
-    it; otherwise it does nothing while a popup is open; it never touches loop instances.
-  - **One recording at a time:** starting while another instance records shows "Recording in <where>. Stop it and record
-    here?" (**Stop it and record here** / **Cancel**). Stop it makes the other instance stop and show its own clean text;
-    it stays open.
-  The buttons and text reflow with the pane size (a tall narrow sidebar works). Closing a window any other way stops it without delivering; the live lines and the audio are already saved.
-- `stenographr notes` (`steno`): live in the terminal until Ctrl+C. Each sentence is printed, and appended at once
-  to the notes file and to the daily file. Inside a git repo the notes file is `<repo root>/steno/steno-YYYY-MM-DD.txt`
-  (and `steno/` is added to the repo's `.gitignore` if git isn't ignoring it yet); elsewhere it is
-  `./steno-YYYY-MM-DD.txt`. The header line `stenographr notes · <folder>` is written when the file is created.
-- `stenographr recall [N]` (`recall`): works on one daily file (today's, else the latest with anything in it). It
-  prints `steno-DATE.txt: N pieces`, lists the newest 10 (sessions and clip/other lines), and asks which to copy: a
-  number copies it, `a` lists all, Enter or `q` exits. `recall 2` copies piece 2 directly. A clip piece copies that
-  transcript's text.
-
-Every live and notes session also keeps its audio: `<archive>/audio/YYYY-MM-DD-HHMMSS-<mode>.opus` (mono, 48 kHz, Opus
-96 kbps, about 0.7 MB per minute, encoded while recording so a crash still leaves it). The session's start line in the
-daily file points to it; its time zero is the text's time zero. If the audio can't be saved the session still runs and
-the start line says `audio: none`. Needs ffmpeg with libopus.
-
-Only the kept records carry times: each sentence line in the daily and notes files starts with `[HH:MM:SS]` (when it
-was said). The terminal output, live screen, clipboard, text sent to Claude and recall output never have them.
-
-Block format (details in [SPEC.md](SPEC.md)):
-
-```
-start: 2026-11-10 20:06:00 · live · unknown · audio/2026-11-10-200600-live.opus
-[20:06:01] <live phrase>
-clean:
-[20:06:01] <clean sentence or paragraph>
-end: 2026-11-10 20:07:30 · 1m30s · ok · copied
-```
-
-The microphone and channel are in `[dictation]` of the config (`mic = "scarlett-mic"`, `channel = 1`).
-
-### Ctrl+` shortcut
-
-```sh
-stenographr keybinding install     # adds "stenographr dictation" = <Control>grave -> <path>/stenographr live --toggle
-stenographr keybinding remove      # removes only that entry
-```
-
-By hand: Settings > Keyboard > View and Customize Shortcuts > Custom Shortcuts > +, name "stenographr dictation",
-command = the output of `command -v stenographr` followed by ` live --toggle`, shortcut Ctrl+`. To undo, delete that entry
-there. Note it is a global shortcut, so it takes Ctrl+` away from apps that use it (e.g. editors' terminal toggle).
-
-## Device selection
-
-Checked before each file with `--device auto`. The GPU is used only if `nvidia-smi` exists, a CUDA-enabled
-sherpa-onnx is installed, free VRAM >= `vram_need_mib + vram_margin_mib`, GPU utilization is below
-`max_gpu_util_pct`, and none of `busy_processes` is running (default: Kdenlive's render, `melt`/`melt-7`/
-`kdenlive_render`). Otherwise CPU. If a GPU run fails the file is redone on the CPU.
+`stenographr update` fast-forwards the source checkout (only a clean `main`), reinstalls if `pyproject.toml` changed, and lists the running
+`live` instances to restart. It never stops them.
 
 ## Config
 
-`~/.config/stenographr/config.toml` (all keys optional):
+`~/.config/stenographr/config.toml`, every key optional:
 
 ```toml
 [paths]
 models  = "~/.local/share/stenographr/models"
 archive = "/data/transcripts"
-
 [engine]
 name = "parakeet-tdt-0.6b-v2-int8"
-num_threads = 8
-batch_size = 0          # 0 = auto (GPU 1, CPU 8)
-
 [device]
-device = "auto"
-vram_need_mib = 1000
-vram_margin_mib = 500
-max_gpu_util_pct = 30
-busy_processes = ["melt", "melt-7", "kdenlive_render"]
+device = "auto"            # `live` and `notes` default to cpu
+[dictation]
+mic = "scarlett-mic"
+channel = 1
 ```
 
-## Log
+## More
 
-`<archive>/steno.log`: one plain-text line per event: `time level file message` (start, device and why,
-timing, finish, errors).
-
-## Tests
-
-`hyperbeam stenographr test` (runs `bash tests/run-tests.sh` in the lab; offline, no model; fake engine and fake `nvidia-smi`/`ffmpeg`/`ffprobe`).
-If no python with numpy and textual is found, it makes a `.venv` with uv.
-
-The two Scarlett 2i2s need fixed PipeWire names (`scarlett-mic`); the WirePlumber rule and its install are in [docs/audio-setup.md](docs/audio-setup.md).
+[SPEC.md](SPEC.md) (behaviour and formats) · [docs/DECISIONS.md](docs/DECISIONS.md) (why) · [docs/audio-setup.md](docs/audio-setup.md) ·
+`bash tests/run-tests.sh` (offline; `hyperbeam lab run --why "stenographr tests" -- bash tests/run-tests.sh`) ·
+`docs/make-media.sh` regenerates `docs/img` in the lab.
