@@ -11,7 +11,7 @@ from . import config as configmod
 from .log import Log
 from .runner import Engines, transcribe_audio
 from .srt import write_srt
-from . import daily, dictate, keybind, live as livemod, recall as recallmod
+from . import daily, dictate, keybind, live as livemod, live_popup as popup, recall as recallmod
 
 
 def _q(path) -> str:
@@ -126,7 +126,7 @@ def _dictation_device(cfg) -> str:
 def cmd_live(args) -> int:
     cfg, log = _cfg_log(args)
     if args.toggle:
-        return livemod.toggle(cfg, log, args.config)
+        return popup.toggle(cfg, log, args.config)
     return livemod.run(cfg, log, args.device or _dictation_device(cfg), popup=args.popup, headless=args.headless)
 
 
@@ -188,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("notes", help="live notes in this terminal until Ctrl+C")
     d.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: cpu (config [device] device overrides)")
     d.set_defaults(fn=cmd_notes)
-    lv = sub.add_parser("live", help="live screen: phrases as you speak, clean text when you stop (never types)")
+    lv = sub.add_parser("live", help="live screen: phrases as you speak, clean text when you stop (never types, except the Append and Send buttons)")
     lv.add_argument("--popup", action="store_true", help="the Ctrl+` popup: records at once, one capture, then closes")
     lv.add_argument("--toggle", action="store_true",
                     help="Ctrl+`: stop the recording popup, or open a popup (never touches pane instances)")

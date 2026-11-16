@@ -14,7 +14,8 @@ import threading
 import time
 
 from . import registry, tmuxsend
-from .live import LiveSession, stop_other
+from .live import LiveSession
+from .live_popup import stop_other
 from .live_state import LiveState, Phase as P
 from .runner import Engines
 
