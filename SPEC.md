@@ -240,10 +240,12 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
       ever presses Enter (rule relaxed 2026-11-10 for this button only).
     - Not `s` (it is Stop on the recording screen; a double tap must never submit), and Enter stays disabled at the button step.
   - **Copy (y)** also adds one trailing space, so a second take, or typing, continues cleanly.
-  - **Layout adapts to the terminal** (changed 2026-11-10; it runs in tmux split panes, sometimes a tall narrow sidebar): the
-    buttons form a grid with as many columns as fit (a label needs ~26 cells; one column in a narrow pane, one-line buttons
-    below 40 columns), and the banner, status, "Last:" line and clean text wrap and reflow when the pane is resized. Every
-    button keeps its whole label from 28 columns up (tested at 28x40, 36x30, 60x25, 80x25 and 120x20).
+  - **Layout adapts to the terminal** (changed 2026-11-16: compact): every button is one row tall, no border, with a short label
+    (`Start r`, `Stop s`, `Copy y`, `Append a`, `Send e`, `New r`, `Close q`, `Stop it y`, `Cancel n`; the letter is the key).
+    The button grid is CSS only: 5 columns from 60 cells wide (all buttons of a phase on one row), 3 columns from 36, 2 below
+    that (so at 40 columns the five review buttons take two rows). The log takes all the remaining height; the "Last:" row is
+    hidden when empty. Banner, status and clean text wrap and reflow on resize. Tested at 28x40 ... 120x20 (whole labels) and
+    at 85x12, 80x24, 40x30 (button area height); pictures in `docs/img/`.
   - **Window closed any other way** (X button = SIGHUP, kill = SIGTERM): recording stops, the clean pass runs if it
     can, the end line says `ok · not copied (window closed)` (or `FAILED: clean pass failed`); nothing is
     delivered. A second hang-up during this wrap-up is ignored. SIGKILL leaves the live lines and audio, no end line.
