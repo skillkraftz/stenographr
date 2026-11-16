@@ -7,7 +7,7 @@ Two kinds of instance (see SPEC.md):
 
 One capture = a LiveSession: record (live phrases shown and appended to the daily file as they come) -> stop ->
 clean pass (the session's whole audio in one go, whole sentences) -> the user's choice -> clean block + end line in
-the daily file. It never types into other windows. Only one instance records at a time (registry.py).
+the daily file. It never types, except the Append and Send buttons. Only one instance records at a time (registry.py).
 
 Daily block:
   start: ... · live · unknown · audio/<...>-live.opus

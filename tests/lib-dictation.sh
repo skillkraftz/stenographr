@@ -1,7 +1,7 @@
 # Extra helpers for the dictation sections (live, notes, recall, ...). Sourced after lib.sh.
 export XDG_CONFIG_HOME=$W/xdg GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null   # the user's global gitignore must not matter
 export XDG_RUNTIME_DIR=$W/run FAKE_PW_LOG=$W/pw.log FAKE_CLIP=$W/clip FAKE_GSETTINGS=$W/gs
-dfresh() { fresh; pkill -f "$FB/pw-record" 2>/dev/null; rm -rf "$XDG_RUNTIME_DIR" "$W/pw.log" "$W/clip" "$W/gate"; unset HB_CLAUDE_PANE TMUX_PANE FAKE_TMUX_SESSENV FAKE_TMUX_SESSION FAKE_MIC_MISSING FAKE_PW_FAIL FAKE_ENGINE_TEXT FAKE_ENGINE_SECONDS FAKE_PW_GATE FAKE_PW_CHUNKS FAKE_ENGINE_LOAD_DELAY FAKE_ENGINE_CLEAN_TEXT FAKE_ENGINE_CLEAN_SECONDS FAKE_ENGINE_CLEAN_FAIL FAKE_TMUX_CLIENTS FAKE_TMUX_PANES FAKE_TMUX_SEND_FAIL; rm -f "$W/tmux.log" "$W/kitty.log" "$W/wmctrl.log" "$W/wlcopy.log" "$W/sig"; unset FAKE_WLCOPY_HOLD; }
+dfresh() { fresh; pkill -f "$FB/pw-record" 2>/dev/null; rm -rf "$XDG_RUNTIME_DIR" "$W/pw.log" "$W/clip" "$W/gate"; unset HB_CLAUDE_PANE STENO_CLAUDE_PANE TMUX_PANE FAKE_TMUX_SESSENV FAKE_TMUX_SESSION FAKE_MIC_MISSING FAKE_PW_FAIL FAKE_ENGINE_TEXT FAKE_ENGINE_SECONDS FAKE_PW_GATE FAKE_PW_CHUNKS FAKE_ENGINE_LOAD_DELAY FAKE_ENGINE_CLEAN_TEXT FAKE_ENGINE_CLEAN_SECONDS FAKE_ENGINE_CLEAN_FAIL FAKE_TMUX_CLIENTS FAKE_TMUX_PANES FAKE_TMUX_SEND_FAIL; rm -f "$W/tmux.log" "$W/kitty.log" "$W/wmctrl.log" "$W/wlcopy.log" "$W/sig"; unset FAKE_WLCOPY_HOLD; }
 DAILY=$A/steno-$(date +%F).txt
 BLK='[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}'
 

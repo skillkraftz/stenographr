@@ -81,7 +81,7 @@ alias steno='stenographr notes'
 alias recall='stenographr recall'
 ```
 
-- `stenographr live`: a Textual screen that never types into other windows. It shows each phrase as you speak (and
+- `stenographr live`: a Textual screen that never types, except the Append and Send buttons. It shows each phrase as you speak (and
   appends it to the daily file), and when you stop it re-transcribes the whole session in one pass to get whole
   sentences. Two kinds of instance, and several can be open at once:
   - **Loop** (`stenographr live` in a terminal or tmux pane): opens on **Ready** (mic closed). **Start** (Enter or `r`) ->

@@ -84,7 +84,7 @@ print("TARGET:", default, pane, sorted(panes), note)
 s = start(); wait(lambda: s.phrases == ["one"]); go(2); go(3); wait(lambda: len(s.phrases) == 3); s.request_stop(); s.record_thread.join(10); s.clean()
 print("STATUS:", s.deliver("send", default, pane))
 ' > "$W/core.out" 2>&1
-check "HB_CLAUDE_PANE in our environment, pane exists: that pane is the target (its session), no picker" 'grep -qx "TARGET: alpha %0 \[.alpha., .beta.\] None" "$W/core.out"'
+check "HB_CLAUDE_PANE (old name) in our environment, pane exists: that pane is the target (its session), no picker" 'grep -qx "TARGET: alpha %0 \[.alpha., .beta.\] None" "$W/core.out"'
 check "Send: the text on ONE line (no trailing space) in one send-keys -l call to alpha's pane (%0), then exactly one Enter key, in that order" '[[ $(grep -c "^send-keys|" "$W/tmux.log") == 2 ]] && [[ $(grep "^send-keys|" "$W/tmux.log" | sed -n 1p) == "send-keys|-t|%0|-l|--|Clean 15 seconds. Second sentence.|" && $(grep "^send-keys|" "$W/tmux.log" | sed -n 2p) == "send-keys|-t|%0|Enter|" ]]'
 check "end line: sent to claude alpha; nothing on the clipboard" '[[ ! -e $W/clip ]] && grep -qx "STATUS: ok · sent to claude alpha" "$W/core.out" && tail -1 "$DAILY" | grep -qE "^end: $BLK · [0-9]+s · ok · sent to claude alpha$"'
 dfresh; mkdir -p "$W/gate"; export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
@@ -97,7 +97,7 @@ check "tmux send fails: end line FAILED: send to claude failed, logged" 'grep -q
 unset FAKE_TMUX_SEND_FAIL
 dfresh; export FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
 runcore 'from stenographr import tmuxsend; d, pn, p, nt = tmuxsend.choose_target(); print("TARGET:", d, pn, sorted(p), nt)' > "$W/core.out" 2>&1
-check "nothing set (not in hyperbeam): no target; the picker list holds the sessions that have a claude pane" 'grep -qx "TARGET: None None \[.alpha., .beta.\] None" "$W/core.out"'
+check "nothing set (no pane variable): no target; the picker list holds the sessions that have a claude pane" 'grep -qx "TARGET: None None \[.alpha., .beta.\] None" "$W/core.out"'
 export FAKE_TMUX_PANES='gamma\t%5\tbash\nbeta\t%2\tclaude'
 runcore 'from stenographr import tmuxsend; d, pn, p, nt = tmuxsend.choose_target(); print("TARGET:", d, pn, sorted(p), nt)' > "$W/core.out" 2>&1
 check "nothing set, one other session has a claude pane: the picker lists it" 'grep -qx "TARGET: None None \[.beta.\] None" "$W/core.out"'
@@ -113,8 +113,14 @@ runcore 'from stenographr import tmuxsend; d, pn, p, nt = tmuxsend.choose_target
 check "the environment variable wins over the session environment" 'grep -qx "TARGET: alpha %0 \[.alpha., .beta.\] None" "$W/core.out"'
 export HB_CLAUDE_PANE=%77
 runcore 'from stenographr import tmuxsend; d, pn, p, nt = tmuxsend.choose_target(); print("TARGET:", d, pn, sorted(p), nt)' > "$W/core.out" 2>&1
-check "stale id: the notice 'hyperbeam's Claude pane not found', no target (picker)" 'grep -qx "TARGET: None None \[.alpha., .beta.\] hyperbeam.s Claude pane not found" "$W/core.out"'
-unset HB_CLAUDE_PANE TMUX_PANE FAKE_TMUX_SESSION FAKE_TMUX_SESSENV
+check "stale id: the notice 'the Claude pane is gone', no target (picker)" 'grep -qx "TARGET: None None \[.alpha., .beta.\] the Claude pane is gone" "$W/core.out"'
+export STENO_CLAUDE_PANE=%2
+runcore 'from stenographr import tmuxsend; d, pn, p, nt = tmuxsend.choose_target(); print("TARGET:", d, pn, sorted(p), nt)' > "$W/core.out" 2>&1
+check "STENO_CLAUDE_PANE wins over the old HB_CLAUDE_PANE (even a stale one)" 'grep -qx "TARGET: beta %2 \[.alpha., .beta.\] None" "$W/core.out"'
+unset HB_CLAUDE_PANE
+runcore 'from stenographr import tmuxsend; d, pn, p, nt = tmuxsend.choose_target(); print("TARGET:", d, pn, sorted(p), nt)' > "$W/core.out" 2>&1
+check "STENO_CLAUDE_PANE alone is enough" 'grep -qx "TARGET: beta %2 \[.alpha., .beta.\] None" "$W/core.out"'
+unset STENO_CLAUDE_PANE TMUX_PANE FAKE_TMUX_SESSION FAKE_TMUX_SESSENV
 unset HB_CLAUDE_PANE
 
 

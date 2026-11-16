@@ -1,9 +1,9 @@
-"""Find a Claude Code pane in tmux and type text into its input box. Uses the tmux command directly (no hyperbeam).
+"""Find a Claude Code pane in tmux and type text into its input box. Uses the tmux command directly.
 
-A Claude pane is one whose `pane_current_command` is `claude` (the same rule hyperbeam uses). Text goes in with
+A Claude pane is one whose `pane_current_command` is `claude`. Text goes in with
 `tmux send-keys -l`, which appends to what is already in the input. Two ways in (the only place Enter is ever sent):
   append  the text plus one trailing space; no Enter, so several takes can be appended
-  send    the text, then `send-keys Enter` (the way hyperbeam's send_line does it): submits everything now in the input
+  send    the text, then `send-keys Enter` submits everything now in the input
 """
 from __future__ import annotations
 
@@ -44,12 +44,16 @@ def _all_panes() -> dict[str, str]:
     return out
 
 
-def hyperbeam_pane() -> str | None:
-    """The pane id hyperbeam named as this project's Claude pane (HB_CLAUDE_PANE), or None when not in hyperbeam.
-    1. our own environment; 2. else, inside tmux, the HB_CLAUDE_PANE of the session our pane is in."""
-    pane = os.environ.get("HB_CLAUDE_PANE", "").strip()
-    if pane:
-        return pane
+_PANE_VARS = ("STENO_CLAUDE_PANE", "HB_CLAUDE_PANE")     # HB_CLAUDE_PANE: the older (hyperbeam) name, still read as a fallback
+
+
+def named_pane() -> str | None:
+    """The pane id named as the Claude pane, or None. Per variable (STENO_CLAUDE_PANE first, then the old
+    HB_CLAUDE_PANE): 1. our own environment; 2. else, inside tmux, that variable in the session our pane is in."""
+    for var in _PANE_VARS:
+        pane = os.environ.get(var, "").strip()
+        if pane:
+            return pane
     mine = os.environ.get("TMUX_PANE")
     if not mine:
         return None
@@ -58,24 +62,29 @@ def hyperbeam_pane() -> str | None:
         sess = r.stdout.strip() if r.returncode == 0 else ""
         if not sess:
             return None
-        r = _tmux("show-environment", "-t", sess, "HB_CLAUDE_PANE")
+        for var in _PANE_VARS:
+            r = _tmux("show-environment", "-t", sess, var)
+            out = r.stdout.strip() if r.returncode == 0 else ""
+            if out.startswith(var + "="):
+                val = out.split("=", 1)[1].strip()
+                if val:
+                    return val
     except (OSError, subprocess.SubprocessError):
         return None
-    out = r.stdout.strip() if r.returncode == 0 else ""
-    return out.split("=", 1)[1].strip() or None if out.startswith("HB_CLAUDE_PANE=") else None
+    return None
 
 
 def choose_target() -> tuple[str | None, str | None, dict[str, str], str | None]:
     """(target session, target pane id, {session: Claude pane} for the picker, notice).
-    A hyperbeam pane that exists is the target, no question (its session name is the target session). If the id is
-    set but the pane is gone, the notice says so and the caller offers the picker. Not in hyperbeam: the picker."""
+    A named pane that exists is the target, no question (its session name is the target session). If the id is
+    set but the pane is gone, the notice says so and the caller offers the picker. No id anywhere: the picker."""
     panes = claude_panes()
-    hb = hyperbeam_pane()
-    if hb:
-        sess = _all_panes().get(hb)
+    named = named_pane()
+    if named:
+        sess = _all_panes().get(named)
         if sess:
-            return sess, hb, panes, None
-        return None, None, panes, "hyperbeam's Claude pane not found"
+            return sess, named, panes, None
+        return None, None, panes, "the Claude pane is gone"
     return None, None, panes, None
 
 

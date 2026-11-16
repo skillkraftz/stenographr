@@ -188,7 +188,7 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("notes", help="live notes in this terminal until Ctrl+C")
     d.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: cpu (config [device] device overrides)")
     d.set_defaults(fn=cmd_notes)
-    lv = sub.add_parser("live", help="live screen: phrases as you speak, clean text when you stop (never types)")
+    lv = sub.add_parser("live", help="live screen: phrases as you speak, clean text when you stop (never types, except the Append and Send buttons)")
     lv.add_argument("--popup", action="store_true", help="the Ctrl+` popup: records at once, one capture, then closes")
     lv.add_argument("--toggle", action="store_true",
                     help="Ctrl+`: stop the recording popup, or open a popup (never touches pane instances)")

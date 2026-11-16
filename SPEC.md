@@ -181,7 +181,7 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
 - **Clip:** section 1.
 - **Live screen**, `stenographr live` (changed 2026-11-10; replaces the old type mode and its ydotool code, which
   typed each phrase into whatever window was focused, broke sentences at every pause, and leaked Ctrl into the typed
-  keys). Textual. It never types into other windows. Banner "Live preview · final text is cleaned up when you stop".
+  keys). Textual. It never types, except the Append and Send buttons (into the Claude pane). Banner "Live preview · final text is cleaned up when you stop".
   A capture records `scarlett-mic` exactly like notes (48 kHz, channel 1, audio to
   `<archive>/audio/YYYY-MM-DD-HHMMSS-live.opus`), shows each phrase as it is recognised and appends it,
   timestamped, to the daily file as it goes. Mode `live`, target `unknown`. Several instances can be open at once
@@ -224,21 +224,20 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
     the screen returns to Review (error in the status line, all buttons, the Ctrl+` popup too), the take stays and no end
     line is written yet: retry or use another button; the end line comes with the eventual choice (or the window closing).
     While recording or cleaning the status line says q/Esc are disabled.
-  - **Claude: append and send** (two buttons, replacing "Send to Claude"). The target is hyperbeam's Claude pane, found in
-    this order (`tmuxsend.choose_target`, plain `tmux`, no hyperbeam code):
-    1. `HB_CLAUDE_PANE` (a pane id like `%12`, set by hyperbeam in every project session) in our own environment;
+  - **Claude: append and send** (two buttons, replacing "Send to Claude"). The target is the Claude pane, found in
+    this order (`tmuxsend.choose_target`, plain `tmux`):
+    1. `STENO_CLAUDE_PANE` (a pane id like `%12`), else the older `HB_CLAUDE_PANE` (fallback, still read), in our own environment;
     2. else, inside tmux (`$TMUX_PANE` set): the session our pane is in (`tmux display-message -p -t $TMUX_PANE '#{session_name}'`),
-       then `tmux show-environment -t <session> HB_CLAUDE_PANE`.
+       then `tmux show-environment -t <session>` for `STENO_CLAUDE_PANE`, then `HB_CLAUDE_PANE`.
     If an id comes out and that pane exists, Append/Send go there with no question, and that pane's session name is shown at
     the right end of the blue "Live preview" bar (a loop shows its own tmux session there until a target is known). If the id is
-    set but the pane is gone, the status line says "hyperbeam's Claude pane not found" and the buttons open a short list of the
-    sessions whose pane runs `claude` (`pane_current_command`). Not in hyperbeam (no variable anywhere, e.g. the kitty popup):
+    set but the pane is gone, the status line says "the Claude pane is gone" and the buttons open a short list of the
+    sessions whose pane runs `claude` (`pane_current_command`). No variable anywhere (e.g. the kitty popup):
     that list, as before. With no target and no Claude pane anywhere both buttons are disabled. The old guess from the
     attached tmux client's session is gone. The labels are just "Claude append (a)" and "Claude send (e)".
     - **Append (a):** `tmux send-keys -t <pane> -l -- "<clean text, one line> "`: the text plus ONE trailing space, no Enter.
       Whatever is already in Claude's input stays, so several takes can be appended one after another.
-    - **Send (e):** the same `send-keys -l` with the text (no trailing space), then `tmux send-keys -t <pane> Enter` (as hyperbeam's
-      `send_line` does): everything now in Claude's input, earlier appends included, is submitted. This is the ONLY place stenographr
+    - **Send (e):** the same `send-keys -l` with the text (no trailing space), then `tmux send-keys -t <pane> Enter` : everything now in Claude's input, earlier appends included, is submitted. This is the ONLY place stenographr
       ever presses Enter (rule relaxed 2026-11-10 for this button only).
     - Not `s` (it is Stop on the recording screen; a double tap must never submit), and Enter stays disabled at the button step.
   - **Copy (y)** also adds one trailing space, so a second take, or typing, continues cleanly.

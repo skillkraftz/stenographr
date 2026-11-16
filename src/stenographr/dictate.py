@@ -1,7 +1,7 @@
 """Dictation: the one live loop (`_live`) shared by `notes` (terminal) and `live` (the Textual screen, live.py).
 
   notes  `stenographr notes`: sentences are printed in the terminal and appended to the notes file + the daily file.
-  live   `stenographr live`: the live screen; it never types into other windows (see live.py).
+  live   `stenographr live`: the live screen; it never types, except the Append and Send buttons (see live.py).
 """
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 """The live screen (Textual). about 80x25 cells, any size works. It only draws what the flow (live_flow.py) tells it
 and passes keys and buttons on as user actions; the phases and their transitions are in live_state.py.
-It never types into other windows.
+It never types, except the Append and Send buttons.
 """
 from __future__ import annotations
 

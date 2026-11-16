@@ -88,7 +88,7 @@ async def main():
     print("EXITED")
 asyncio.run(main())
 ' > "$W/ui.out" 2>&1
-check "UI, stale id: status shows hyperbeam's Claude pane not found, Append opens the picker" 'grep -q "^STATUS: .*hyperbeam.s Claude pane not found" "$W/ui.out" && grep -q "^PICKER: PickSession" "$W/ui.out"'
+check "UI, stale id: status shows the Claude pane is gone, Append opens the picker" 'grep -q "^STATUS: .*the Claude pane is gone" "$W/ui.out" && grep -q "^PICKER: PickSession" "$W/ui.out"'
 unset HB_CLAUDE_PANE
 
 
