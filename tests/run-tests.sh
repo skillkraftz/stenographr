@@ -437,7 +437,7 @@ async def main():
 asyncio.run(main())
 ' > "$W/ui.out" 2>&1
 check "screen: banner text, each phrase shown as recognised, only Stop visible while recording" 'grep -q "^BANNER: Live preview · final text is cleaned up when you stop" "$W/ui.out" && grep -q "^RECORDING: \[.one.\] {.start.: False, .stop.: True, .copy.: False, .append.: False, .send.: False, .new.: False, .close.: False, .stopit.: False, .cancel.: False}" "$W/ui.out"'
-check "popup, after Stop: the clean text and exactly Copy, Claude append (a), Claude send (e), Close (no New); the project name is at the right end of the bar" 'grep -q "^REVIEW: \[.Clean 15 seconds..\]" "$W/ui.out" && grep -q ".append.: (.Claude append (a)., False, True)" "$W/ui.out" && grep -q ".send.: (.Claude send (e)., False, True)" "$W/ui.out" && grep -qF "Close (q / Esc)" "$W/ui.out" && grep -q ".new.: (.New (r)., False, False)" "$W/ui.out" && grep -qx "BANNER-R: alpha" "$W/ui.out"'
+check "popup, after Stop: the clean text and exactly Copy, Append a, Send e, Close (no New); the project name is at the right end of the bar" 'grep -q "^REVIEW: \[.Clean 15 seconds..\]" "$W/ui.out" && grep -q ".append.: (.Append a., False, True)" "$W/ui.out" && grep -q ".send.: (.Send e., False, True)" "$W/ui.out" && grep -qF "Close q" "$W/ui.out" && grep -q ".new.: (.New r., False, False)" "$W/ui.out" && grep -qx "BANNER-R: alpha" "$W/ui.out"'
 check "clicking Claude send: the text typed to %0, then one Enter; the window exits; end line sent to claude alpha" 'grep -q "^EXITED" "$W/ui.out" && [[ $(grep -c "^send-keys|" "$W/tmux.log") == 2 ]] && grep -qxF "send-keys|-t|%0|-l|--|Clean 15 seconds.|" "$W/tmux.log" && grep -qxF "send-keys|-t|%0|Enter|" "$W/tmux.log" && tail -1 "$DAILY" | grep -qE "· ok · sent to claude alpha$"'
 dfresh; mkdir -p "$W/gate"
 runui '
@@ -468,7 +468,7 @@ async def main():
     print("EXITED")
 asyncio.run(main())
 ' > "$W/ui.out" 2>&1
-check "no claude pane: both Claude buttons are disabled (and their keys do nothing)" 'grep -q "^CLAUDE: (.Claude append (a)., True, True) (.Claude send (e)., True, True)" "$W/ui.out" && grep -q "^PHASE-AFTER-AE: review" "$W/ui.out" && ! grep -q "^send-keys" "$W/tmux.log" 2>/dev/null'
+check "no claude pane: both Claude buttons are disabled (and their keys do nothing)" 'grep -q "^CLAUDE: (.Append a., True, True) (.Send e., True, True)" "$W/ui.out" && grep -q "^PHASE-AFTER-AE: review" "$W/ui.out" && ! grep -q "^send-keys" "$W/tmux.log" 2>/dev/null'
 check "the keys work too: s stops, y copies the clean text" 'grep -q "^EXITED" "$W/ui.out" && [[ $(cat "$W/clip") == "Clean 15 seconds. " ]] && tail -1 "$DAILY" | grep -qE "· ok · copied$"'
 dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
 runui '
@@ -484,7 +484,7 @@ async def main():
     print("EXITED")
 asyncio.run(main())
 ' > "$W/ui.out" 2>&1
-check "ambiguous (two clients): Claude append opens a list of sessions with a claude pane; picking beta appends there (text + space, no Enter)" 'grep -q "^CLAUDE: Claude append (a)" "$W/ui.out" && grep -q "^PICKER: PickSession \[.alpha., .beta.\]" "$W/ui.out" && grep -q "^EXITED" "$W/ui.out" && grep -qxF "send-keys|-t|%2|-l|--|Clean 15 seconds. |" "$W/tmux.log" && ! grep -qi "enter" "$W/tmux.log" && tail -1 "$DAILY" | grep -qE "· ok · appended to claude beta$"'
+check "ambiguous (two clients): Claude append opens a list of sessions with a claude pane; picking beta appends there (text + space, no Enter)" 'grep -q "^CLAUDE: Append a" "$W/ui.out" && grep -q "^PICKER: PickSession \[.alpha., .beta.\]" "$W/ui.out" && grep -q "^EXITED" "$W/ui.out" && grep -qxF "send-keys|-t|%2|-l|--|Clean 15 seconds. |" "$W/tmux.log" && ! grep -qi "enter" "$W/tmux.log" && tail -1 "$DAILY" | grep -qE "· ok · appended to claude beta$"'
 
 dfresh; mkdir -p "$W/gate"; export HB_CLAUDE_PANE=%77 FAKE_TMUX_PANES='alpha\t%0\tclaude\nbeta\t%2\tclaude'
 runui '
@@ -535,7 +535,7 @@ asyncio.run(main())
 ' > "$W/ui.out" 2>&1
 check "loop starts on Ready, mic closed (no recorder), buttons Start and Close, nothing in the last line" 'grep -q "^READY: Ready \[.start., .close.\] | last: .. | mic opened: False" "$W/ui.out"'
 check "Start (r) records: only Stop shown, the recorder is opened now" 'grep -q "^RECORDING: \[.stop.\] | mic opened: True" "$W/ui.out"'
-check "button step (loop): Copy, Claude append (a), Claude send (e), New, Close; project name on the bar" 'grep -q "^REVIEW: \[.copy., .append., .send., .new., .close.\] | Claude append (a) | Claude send (e) | alpha" "$W/ui.out"'
+check "button step (loop): Copy, Append a, Send e, New, Close; project name on the bar" 'grep -q "^REVIEW: \[.copy., .append., .send., .new., .close.\] | Append a | Send e | alpha" "$W/ui.out"'
 check "after Copy: back on Ready with 'Last: copied · HH:MM'; after Send: 'Last: sent to claude alpha · HH:MM'" 'grep -qE "^AFTER-COPY: Ready \| Last: copied · [0-9]{2}:[0-9]{2}$" "$W/ui.out" && grep -qE "^AFTER-SEND: Ready \| Last: sent to claude alpha · [0-9]{2}:[0-9]{2}$" "$W/ui.out" && grep -q "^EXITED" "$W/ui.out"'
 check "two captures: two session blocks (end words copied / sent to claude alpha), two audio files, the typed text + one Enter, the clipboard has the clean text plus a space" '[[ $(grep -c "^start:" "$DAILY") == 2 && $(ls "$A/audio" | wc -l) == 2 ]] && grep -qE "· ok · copied$" "$DAILY" && grep -qE "· ok · sent to claude alpha$" "$DAILY" && [[ $(grep -c "^send-keys|" "$W/tmux.log") == 2 && $(cat "$W/clip") == "Clean 15 seconds. " ]]'
 check "the model was constructed ONCE for the whole app (two captures)" '[[ $(grep -c . "$W/count") == 1 ]] && [[ $(grep -c " live engine loaded" "$LOG") == 1 ]]'
@@ -647,6 +647,33 @@ for sz in 28x40 36x30 60x25 80x25 120x20; do
   check "terminal $sz: every visible button fits inside the screen with its whole label (ready, recording, button step); 5 buttons at the button step" 'grep -q "^SIZE '"$sz"': buttons at review=5 misfits=\[\]$" "$W/ui.out"'
 done
 
+echo "== live screen: one row of small buttons, the log gets the rest (STENO_SHOTS_DIR=dir also saves SVG pictures)"
+dfresh; mkdir -p "$W/gate"; : > "$W/count"; export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude'
+runui2 '
+async def one(w, h):
+    app = LiveApp(cfg, log, "cpu"); out = []
+    shots = os.environ.get("STENO_SHOTS_DIR")
+    async def look(phase):
+        await pilot.pause(0.2)
+        b = app.screen.query_one("#buttons"); lg = app.screen.query_one("#log")
+        out.append(f"{phase}:bh={b.region.height}:bw={b.region.bottom}:lh={lg.region.height}:bt={min(x.region.height for x in app.screen.query("Button") if x.display)}")
+        if shots: open(f"{shots}/live-{phase}-{w}x{h}.svg", "w").write(app.export_screenshot())
+    async with app.run_test(size=(w, h)) as pilot:
+        await until(pilot, lambda: app.phase == "ready"); await look("ready")
+        go(2); go(3)
+        await pilot.press("r"); await until(pilot, lambda: len(logtext(app)) == 3); await look("recording")
+        await pilot.press("s"); await until(pilot, lambda: app.phase == "review"); await look("review")
+        await pilot.press("q"); await pilot.pause(0.2)
+    print(f"SHAPE {w}x{h}: " + " ".join(out))
+async def main():
+    for w, h in ((85, 12), (80, 24), (40, 30)): await one(w, h)
+asyncio.run(main())
+' > "$W/ui.out" 2>&1
+[[ -n $STENO_TEST_DEBUG ]] && cat "$W/ui.out"
+check "85x12: buttons one row (1 tall each), log gets the rest (>=5 rows)" 'grep -qE "^SHAPE 85x12: ready:bh=1:.*:lh=([5-9]|[1-9][0-9]):bt=1 recording:bh=1:.*:bt=1 review:bh=1:.*:lh=([5-9]|[1-9][0-9]):bt=1$" "$W/ui.out"'
+check "80x24: all review buttons on one row; log gets >=18 rows" 'grep -qE "^SHAPE 80x24: ready:bh=1:.* recording:bh=1:.* review:bh=1:.*:lh=(1[89]|2[0-9]):bt=1$" "$W/ui.out"'
+check "40x30: review buttons at most two rows, 1 tall each" 'grep -qE "^SHAPE 40x30: ready:bh=1:.* recording:bh=1:.* review:bh=2:.*:bt=1$" "$W/ui.out"'
+
 echo "== live popup"
 dfresh; mkdir -p "$W/gate"; export HB_CLAUDE_PANE=%0 FAKE_TMUX_PANES='alpha\t%0\tclaude'
 runui2 '
@@ -663,7 +690,7 @@ async def main():
     print("EXITED")
 asyncio.run(main())
 ' > "$W/ui.out" 2>&1
-check "popup records immediately (no Ready screen), then Stop shows Copy, Claude append, Claude send, Close" 'grep -q "^RECORDING: recording \[.stop.\] | mic opened: True" "$W/ui.out" && grep -q "^REVIEW: \[.copy., .append., .send., .close.\] Close (q / Esc)" "$W/ui.out"'
+check "popup records immediately (no Ready screen), then Stop shows Copy, Claude append, Claude send, Close" 'grep -q "^RECORDING: recording \[.stop.\] | mic opened: True" "$W/ui.out" && grep -q "^REVIEW: \[.copy., .append., .send., .close.\] Close q" "$W/ui.out"'
 check "popup exits after the choice (Copy): one block, end line copied" 'grep -q "^EXITED" "$W/ui.out" && [[ $(grep -c "^start:" "$DAILY") == 1 && $(cat "$W/clip") == "Clean 15 seconds. " ]] && tail -1 "$DAILY" | grep -qE "· ok · copied$"'
 dfresh; mkdir -p "$W/gate"
 runui2 '
@@ -695,7 +722,7 @@ async def main():
         await pilot.press("s"); await until(pilot, lambda: app.phase == "review"); await pilot.press("q"); await pilot.pause(0.3)
 asyncio.run(main())
 ' > "$W/ui.out" 2>&1
-check "Start while another instance records: the notice 'Recording in popup. Stop it and record here?' with Stop it / Cancel" 'grep -q "^NOTICE: Recording in popup. Stop it and record here? \[.stopit., .cancel.\] \[.Stop it and record here (y). *, .Cancel (n).\]" "$W/ui.out"'
+check "Start while another instance records: the notice 'Recording in popup. Stop it and record here?' with Stop it / Cancel" 'grep -q "^NOTICE: Recording in popup. Stop it and record here? \[.stopit., .cancel.\] \[.Stop it y. *, .Cancel n.\]" "$W/ui.out"'
 check "Stop it: the other instance stopped (it reached its button step: clean block, NO end line, still running) and this one records" 'grep -q "^B-RECORDING: recording" "$W/ui.out" && kill -0 $AP 2>/dev/null && [[ $(grep -c "^clean:" "$DAILY") -ge 1 ]] && [[ $(grep -c "^start:" "$DAILY") == 2 ]] && [[ $(grep -c "^end:" "$DAILY") == 1 ]]'
 check "that other instance's registry entry says it is no longer recording, and nothing in the log complains" 'grep -q "\"recording\": false" "$REG/$AP.json" && ! grep -q "no running event loop" "$LOG" && ! grep -q "ERROR" "$LOG"'
 kill -HUP $AP; wait $AP 2>/dev/null

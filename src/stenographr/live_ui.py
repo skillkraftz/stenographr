@@ -1,4 +1,4 @@
-"""The live screen (Textual). 80x25 cells. It only shows text and buttons; it never types into other windows.
+"""The live screen (Textual). about 80x25 cells, any size works. It only shows text and buttons; it never types into other windows.
 
 Phases:  ready (loop only) -> [notice] -> recording -> stopping -> cleaning -> review -> (ready | exit)
 A popup skips `ready` and exits after any choice; a loop goes back to `ready` (except Close).
@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import math
 import signal
 import textwrap
 import threading
@@ -17,7 +16,6 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.css.scalar import Scalar
 from textual.screen import ModalScreen
 from textual.widgets import Button, OptionList, RichLog, Static
 
@@ -53,46 +51,16 @@ class PickSession(ModalScreen):
 class LiveApp(App):
     TITLE = "stenographr live"
     CSS = """
-    #banner { height: auto; background: $primary; color: $text; }
-    #banner_l { width: 1fr; padding: 0 1; }
-    #banner_r { width: auto; padding: 0 1; text-style: bold; }
-    #status { height: auto; padding: 0 1; }
-    #last { height: auto; padding: 0 1; color: $text-muted; }
-    #log { height: 1fr; min-height: 3; padding: 0 1; }
-    #buttons { layout: grid; grid-size: 3; padding: 0 1; }
-    #buttons Button { width: 1fr; margin: 0; }
-    PickSession { align: center middle; }
-    #pick { width: 50; height: auto; max-height: 16; border: round $primary; background: $surface; padding: 1; }
-    """
-    BINDINGS = [Binding("escape", "cancel", "Cancel")]
-
-    def __init__(self, sessions: list[str]):
-        super().__init__()
-        self.sessions = sessions
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="pick"):
-            yield Static("Send to which Claude?  (Esc cancels)")
-            yield OptionList(*self.sessions, id="sessions")
-
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        self.dismiss(self.sessions[event.option_index])
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
-
-
-class LiveApp(App):
-    TITLE = "stenographr live"
-    CSS = """
     #banner { height: 1; background: $primary; color: $text; }
     #banner_l { width: 1fr; padding: 0 1; }
     #banner_r { width: auto; padding: 0 1; text-style: bold; }
     #status { height: 1; padding: 0 1; }
     #last { height: 1; padding: 0 1; color: $text-muted; }
     #log { height: 1fr; padding: 0 1; }
-    #buttons { height: 3; padding: 0 1; }
-    #buttons Button { margin: 0 1 0 0; }
+    #buttons { layout: grid; grid-size: 5; grid-rows: 1; height: auto; padding: 0 1; }
+    #buttons Button { width: 1fr; height: 1; min-width: 0; margin: 0; border: none; }
+    #buttons.-mid { grid-size: 3; }
+    #buttons.-narrow { grid-size: 2; }
     PickSession { align: center middle; }
     #pick { width: 50; height: auto; max-height: 16; border: round $primary; background: $surface; padding: 1; }
     """
@@ -127,15 +95,15 @@ class LiveApp(App):
         yield Static("", id="last")
         yield RichLog(id="log", wrap=True, markup=False, highlight=False, min_width=10)
         with Horizontal(id="buttons"):
-            yield Button("Start (Enter or r)", id="start", variant="success")
-            yield Button("Stop (s)", id="stop", variant="error")
-            yield Button("Copy (y)", id="copy", variant="success")
-            yield Button("Claude append (a)", id="append", variant="primary")
-            yield Button("Claude send (e)", id="send", variant="warning")
-            yield Button("New (r)", id="new")
-            yield Button("Close (q / Esc)", id="close")
-            yield Button("Stop it and record here (y)", id="stopit", variant="warning")
-            yield Button("Cancel (n)", id="cancel")
+            yield Button("Start r", id="start", variant="success")
+            yield Button("Stop s", id="stop", variant="error")
+            yield Button("Copy y", id="copy", variant="success")
+            yield Button("Append a", id="append", variant="primary")
+            yield Button("Send e", id="send", variant="warning")
+            yield Button("New r", id="new")
+            yield Button("Close q", id="close")
+            yield Button("Stop it y", id="stopit", variant="warning")
+            yield Button("Cancel n", id="cancel")
 
     def on_mount_buttons(self) -> None:
         for b in self.query(Button):
@@ -147,25 +115,13 @@ class LiveApp(App):
         self._layout()
 
     def _layout(self) -> None:
-        """Fit the buttons to the terminal: as many columns as fit (a label needs ~26 cells), one per row in a narrow
-        sidebar, and one-line buttons below 40 columns. Text (banner, status, clean text) simply wraps."""
-        w = max(self.size.width, 1)
-        shown = [b for b in self.query(Button) if b.display]
+        """The button grid is CSS (one row per 5/3/2 buttons, 1 row tall each); the only code is the width class."""
+        w = self.size.width
         row = self.query_one("#buttons")
-        row.styles.layout = "grid"                  # (set here: the Horizontal container's own layout wins over CSS)
-        row.styles.grid_size_columns = max(1, min(len(shown) or 1, w // 26))
-        row.styles.grid_gutter_vertical = 0         # (buttons have their own borders; no gutters, or rows lose a line)
-        row.styles.grid_gutter_horizontal = 0
-        cols = row.styles.grid_size_columns
-        compact = w < 40
-        nrows, h = max(1, math.ceil(len(shown) / cols)), (1 if compact else 3)
-        row.styles.height = nrows * h
-        row.styles.grid_rows = tuple(Scalar.parse(str(h)) for _ in range(nrows))     # explicit: auto/fr rows squeezed row 1
+        row.set_class(0 < w < 36, "-narrow")
+        row.set_class(36 <= w < 60, "-mid")
         for b in self.query(Button):
-            b.compact = compact
-            b.styles.width = "1fr"                  # (set here: the stylesheet's width/height rules don't reach these)
-            b.styles.height = 1 if compact else 3
-            b.styles.margin = 0
+            b.compact = True
         self._fit()
 
     def on_resize(self, event) -> None:
@@ -179,6 +135,7 @@ class LiveApp(App):
     def _last(self, text: str) -> None:
         self._texts["last"] = text
         self.query_one("#last", Static).update(Text(text))
+        self.query_one("#last").display = bool(text)      # no empty row when there is nothing to say
         self._fit()
 
     def _fit(self) -> None:
@@ -248,7 +205,7 @@ class LiveApp(App):
         self._status(message)
         self._last(f"Last: {self.last[0]} · {self.last[1]}" if self.last else "")
         self.query_one("#log", RichLog).clear()
-        self._label("close", "Close (q)")
+        self._label("close", "Close q")
         self._show("start", "close")
 
     # ------------------------------------------------------------ start a capture (one recording at a time)
@@ -279,7 +236,7 @@ class LiveApp(App):
         elif self.popup:
             self.phase = "error"
             self._status("The other recording did not stop.")
-            self._label("close", "Close (q)")
+            self._label("close", "Close q")
             self._show("close")
         else:
             self._to_ready("The other recording did not stop.")
@@ -291,7 +248,7 @@ class LiveApp(App):
             if self.popup:
                 self.phase = "error"
                 self._status(f"Cannot record: {err}")
-                self._label("close", "Close (q)")
+                self._label("close", "Close q")
                 self._show("close")
             else:
                 self.session = None
@@ -342,7 +299,7 @@ class LiveApp(App):
         if session.result is None:
             self.phase = "error"
             self._status("Recording failed, see steno.log")
-            self._label("close", "Close (q)")
+            self._label("close", "Close q")
             self._show("close")
             return
         self.phase = "cleaning"
@@ -364,7 +321,7 @@ class LiveApp(App):
         text = session.text()
         log = self.query_one("#log", RichLog)
         log.clear()
-        self._label("close", "Close (q / Esc)")
+        self._label("close", "Close q")
         again = () if self.popup else ("new",)
         if not text:
             self.phase = "review"
@@ -450,7 +407,7 @@ class LiveApp(App):
         if status.startswith("FAILED"):                # keep the text on screen so it can be copied by hand
             self.phase = "error"
             self._status(status)
-            self._label("close", "Close (q)")
+            self._label("close", "Close q")
             self._show("close")
             return
         word = {"copy": "copied", "new": "new take", "close": "closed",
