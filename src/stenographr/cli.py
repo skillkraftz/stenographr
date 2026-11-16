@@ -11,7 +11,7 @@ from . import config as configmod
 from .log import Log
 from .runner import Engines, transcribe_audio
 from .srt import write_srt
-from . import daily, dictate, keybind, live as livemod, recall as recallmod
+from . import daily, dictate, keybind, live as livemod, live_popup as popup, recall as recallmod
 
 
 def _q(path) -> str:
@@ -126,7 +126,7 @@ def _dictation_device(cfg) -> str:
 def cmd_live(args) -> int:
     cfg, log = _cfg_log(args)
     if args.toggle:
-        return livemod.toggle(cfg, log, args.config)
+        return popup.toggle(cfg, log, args.config)
     return livemod.run(cfg, log, args.device or _dictation_device(cfg), popup=args.popup, headless=args.headless)
 
 
