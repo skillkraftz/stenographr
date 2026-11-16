@@ -44,6 +44,7 @@ fakeinst() {   # fakeinst NAME KIND RECORDING WHERE: a stand-in instance (counts
 }
 UPRE='
 from stenographr.live_ui import LiveApp, PickSession
+from stenographr.live_state import Phase
 async def until(pilot, cond, secs=8):
     t = time.time()
     while time.time() - t < secs:

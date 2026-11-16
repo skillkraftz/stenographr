@@ -5,6 +5,7 @@
 #   tests/run-tests.sh live-ui    just that section (output live, e.g. to debug; STENO_TEST_DEBUG=1 for more)
 #   tests/run-tests.sh a b        several sections
 HERE=$(dirname "$(readlink -f "$0")")
+export STENO_STRICT=1                     # an illegal live phase move raises in the tests (in real use it is only logged)
 all=(); for f in "$HERE"/sections/*.sh; do all+=("$(basename "$f" .sh)"); done
 want=("$@"); [[ ${#want[@]} == 0 ]] && want=("${all[@]}")
 for s in "${want[@]}"; do [[ -f $HERE/sections/$s.sh ]] || { echo "no section '$s'; sections: ${all[*]}"; exit 2; }; done

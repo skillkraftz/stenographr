@@ -1,16 +1,12 @@
-"""The live screen (Textual). about 80x25 cells, any size works. It only shows text and buttons; it never types into other windows.
-
-Phases:  ready (loop only) -> [notice] -> recording -> stopping -> cleaning -> review -> (ready | exit)
-A popup skips `ready` and exits after any choice; a loop goes back to `ready` (except Close).
+"""The live screen (Textual). about 80x25 cells, any size works. It only draws what the flow (live_flow.py) tells it
+and passes keys and buttons on as user actions; the phases and their transitions are in live_state.py.
+It never types into other windows.
 """
 from __future__ import annotations
 
 import asyncio
-import datetime as dt
 import signal
 import textwrap
-import threading
-import time
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -19,9 +15,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, OptionList, RichLog, Static
 
-from . import registry, tmuxsend
-from .live import LiveSession, stop_other
-from .runner import Engines
+from .live_flow import LiveFlow
 
 BANNER = "Live preview · final text is cleaned up when you stop"
 ALL_BUTTONS = ("start", "stop", "copy", "append", "send", "new", "close", "stopit", "cancel")
@@ -49,6 +43,7 @@ class PickSession(ModalScreen):
 
 
 class LiveApp(App):
+
     TITLE = "stenographr live"
     CSS = """
     #banner { height: 1; background: $primary; color: $text; }
@@ -68,23 +63,33 @@ class LiveApp(App):
                 Binding("r", "again", "Start / New"), Binding("enter", "start", "Start", show=False),
                 Binding("n", "no", "Cancel"), Binding("q", "close", "Close"), Binding("escape", "close", "Close")]
 
+
     def __init__(self, cfg, log, requested: str, popup: bool = False):
         super().__init__()
-        self.cfg, self.slog, self.requested, self.popup = cfg, log, requested, popup
-        self.engines = Engines(cfg, log)           # one model for the app's whole life
-        self.session: LiveSession | None = None
-        self._lines: list[str] = []                # the live lines on screen while recording
-        self._partial_text = ""                    # the line in progress
-        self.entry = None                          # registry.Entry (set by live.run)
-        self.closing = False
-        self.phase = "starting"        # ready | notice | recording | stopping | cleaning | review | picking | error
-        self.last: tuple[str, str] | None = None   # (what happened, HH:MM) of the previous capture
-        self.t_start = time.monotonic()
+        self.popup, self.closing = popup, False
         self._texts = {"status": "", "last": ""}
-        self.other: dict | None = None             # the instance that is recording, during the notice
-        self.claude_default: str | None = None
-        self.claude_pane: str | None = None
-        self.claude_panes: dict[str, str] = {}
+        self.flow = LiveFlow(cfg, log, requested, popup, self)      # the state and what happens when; this class draws it
+
+    # what tests and live.run() reach for: the flow's state
+    phase = property(lambda self: self.flow.phase)
+    session = property(lambda self: self.flow.session)
+    engines = property(lambda self: self.flow.engines)
+    _lines = property(lambda self: self.flow.state.lines)
+    _partial_text = property(lambda self: self.flow.state.partial)
+
+    @property
+    def entry(self):
+        return self.flow.entry
+
+    @entry.setter
+    def entry(self, value) -> None:
+        self.flow.entry = value
+
+    def _add_phrase(self, text: str) -> None:
+        self.flow.add_phrase(text)
+
+    def _set_partial(self, text: str) -> None:
+        self.flow.set_partial(text)
 
     # ------------------------------------------------------------ layout
     def compose(self) -> ComposeResult:
@@ -109,7 +114,7 @@ class LiveApp(App):
         for b in self.query(Button):
             b.can_focus = False                        # Enter must not press a focused button (it would deliver)
 
-    def _show(self, *ids: str) -> None:
+    def buttons(self, *ids: str) -> None:
         for i in ALL_BUTTONS:
             self.query_one(f"#{i}", Button).display = i in ids
         self._layout()
@@ -127,12 +132,12 @@ class LiveApp(App):
     def on_resize(self, event) -> None:
         self._layout()
 
-    def _status(self, text: str) -> None:
+    def status(self, text: str) -> None:
         self._texts["status"] = text
         self.query_one("#status", Static).update(Text(text))
         self._fit()
 
-    def _last(self, text: str) -> None:
+    def last(self, text: str) -> None:
         self._texts["last"] = text
         self.query_one("#last", Static).update(Text(text))
         self.query_one("#last").display = bool(text)      # no empty row when there is nothing to say
@@ -147,12 +152,9 @@ class LiveApp(App):
         avail = max(w - 2 - (len(right) + 2 if right else 0), 1)
         self.query_one("#banner").styles.height = max(1, len(textwrap.wrap(BANNER, avail)) or 1)
 
-    def _label(self, bid: str, text: str) -> None:
-        self.query_one(f"#{bid}", Button).label = text
-
-    def _project(self, name: str = "") -> None:
+    def set_project(self, name: str = "") -> None:
         """Right end of the blue bar: the Claude target's session when known, else this instance's own tmux session."""
-        own = self.entry.data["where"] if self.entry else ""
+        own = self.flow.entry.data["where"] if self.flow.entry else ""
         self.query_one("#banner_r", Static).update(Text(name or (own if own not in ("terminal", "popup") else "")))
         self._fit()
 
@@ -166,276 +168,73 @@ class LiveApp(App):
         if self.entry:
             self.entry.set_recording(on)
 
-    # ------------------------------------------------------------ start
-    def on_mount(self) -> None:
-        self.on_mount_buttons()
-        self._project()
-        self._show()
-        self.set_interval(1.0, self._tick)
-        try:                                           # `live --toggle`, or another instance, sends SIGUSR1 = stop
-            asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, self.action_stop)
-        except (RuntimeError, NotImplementedError, ValueError):
+    def post(self, fn, *args) -> None:                 # from a thread, onto the screen's loop
+        try:
+            self.call_from_thread(fn, *args)
+        except Exception:                              # noqa: BLE001 - the app is already gone
             pass
-        threading.Thread(target=self._preload, daemon=True).start()
-        if self.popup:
-            self._begin()
-        else:
-            self._to_ready()
 
-    def _preload(self) -> None:
-        """Load the model in the background, once, for the app's lifetime (a capture that starts before it is
-        loaded keeps all its audio: the recorder runs first and is queued)."""
-        try:
-            self.engines.get_stream("live")            # the preview model first: a capture needs it at once
-        except Exception as e:                         # noqa: BLE001 - a capture falls back to the per-phrase decode
-            self.slog.error("live", f"preloading the streaming model failed: {type(e).__name__}: {e}")
-        try:
-            self.engines.get(self.engines.decide(self.requested, "live"), "live")     # the clean pass at stop
-        except Exception as e:                         # noqa: BLE001 - a capture will fall back or report it
-            self.slog.error("live", f"preloading the model failed: {type(e).__name__}: {e}")
-
-    def _tick(self) -> None:
-        if self.phase == "recording":
-            s = int(time.monotonic() - self.t_start)
-            self._status(f"● Recording {s // 60:02d}:{s % 60:02d} · stop: s, the button, or Ctrl+`")
-
-    # ------------------------------------------------------------ ready (loop)
-    def _to_ready(self, message: str = "Ready") -> None:
-        self.phase = "ready"
-        self._status(message)
-        self._last(f"Last: {self.last[0]} · {self.last[1]}" if self.last else "")
-        self.query_one("#log", RichLog).clear()
-        self._label("close", "Close q")
-        self._show("start", "close")
-
-    # ------------------------------------------------------------ start a capture (one recording at a time)
-    def _begin(self) -> None:
-        other = registry.recording_elsewhere()
-        if other:
-            self.phase = "notice"
-            self.other = other
-            self._status(f"Recording in {other['where']}. Stop it and record here?")
-            self._show("stopit", "cancel")
-            return
-        self._start_capture()
-
-    def _stop_it(self) -> None:
-        self._status("Stopping the other recording…")
-        self._show()
-        other = self.other
-
-        def work():
-            ok = stop_other(other)
-            self._post(self._after_stop_other, ok)
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def _after_stop_other(self, ok: bool) -> None:
-        if ok:
-            self._start_capture()
-        elif self.popup:
-            self.phase = "error"
-            self._status("The other recording did not stop.")
-            self._label("close", "Close q")
-            self._show("close")
-        else:
-            self._to_ready("The other recording did not stop.")
-
-    def _start_capture(self) -> None:
-        self.session = LiveSession(self.cfg, self.slog, self.requested, self.engines)
-        err = self.session.preflight()
-        if err:
-            if self.popup:
-                self.phase = "error"
-                self._status(f"Cannot record: {err}")
-                self._label("close", "Close q")
-                self._show("close")
-            else:
-                self.session = None
-                self._to_ready(f"Cannot record: {err}")
-            return
-        self.phase = "recording"
-        self.t_start = time.monotonic()
-        self._set_recording(True)
-        self.query_one("#log", RichLog).clear()
-        self._lines, self._partial_text = [], ""
-        self._last("")
-        self._show("stop")
-        self._tick()
-        self.session.on_phrase = lambda t: self._post(self._add_phrase, t)
-        self.session.on_partial = lambda t: self._post(self._set_partial, t)
-        self.session.record_thread = threading.Thread(target=self._record_main, args=(self.session,), daemon=True)
-        self.session.record_thread.start()
-
-    def _add_phrase(self, text: str) -> None:
-        self._lines.append(text)
-        self._render_live()
-
-    def _set_partial(self, text: str) -> None:
-        # "stopping" too: after Stop the loop still flushes the last line and then clears the partial (""); dropping
-        # that update left the old partial on screen under the finished line, so the last line showed twice
-        if self.phase in ("recording", "stopping"):
-            self._partial_text = text
-            self._render_live()
-
-    def _render_live(self) -> None:
+    def render_live(self, lines: list[str], partial: str) -> None:
         """The finished lines plus the line in progress (RichLog only appends, so it is redrawn)."""
         log = self.query_one("#log", RichLog)
         log.clear()
-        for t in self._lines:
+        for t in lines:
             log.write(t)
-        if self._partial_text:
-            log.write(self._partial_text)
+        if partial:
+            log.write(partial)
 
-    # ------------------------------------------------------------ record -> clean -> review
-    def _record_main(self, session: LiveSession) -> None:
-        session.record()
-        self._set_recording(False)                     # the microphone is free: another instance may record now
-        self._post(self._recorded, session)
+    def clear_log(self) -> None:
+        self.query_one("#log", RichLog).clear()
 
-    def _recorded(self, session: LiveSession) -> None:
-        if session is not self.session:
-            return
-        if session.result is None:
-            self.phase = "error"
-            self._status("Recording failed, see steno.log")
-            self._label("close", "Close q")
-            self._show("close")
-            return
-        self.phase = "cleaning"
-        self._show()
-        self._status("Cleaning up…")
-        session.clean_thread = threading.Thread(target=self._clean_main, args=(session,), daemon=True)
-        session.clean_thread.start()
+    def write_log(self, text: str) -> None:
+        self.query_one("#log", RichLog).write(text)
 
-    def _clean_main(self, session: LiveSession) -> None:
-        try:
-            session.clean()
-        except Exception:                              # noqa: BLE001 - logged; the live text is used instead
-            pass
-        self._post(self._review, session)
-
-    def _review(self, session: LiveSession) -> None:
-        if session is not self.session:
-            return
-        text = session.text()
-        log = self.query_one("#log", RichLog)
-        log.clear()
-        self._label("close", "Close q")
-        again = () if self.popup else ("new",)
-        if not text:
-            self.phase = "review"
-            self._status("No speech heard.")
-            self._show(*again, "close")
-            return
-        log.write(text)
-        self.claude_default, self.claude_pane, self.claude_panes, notice = tmuxsend.choose_target()
-        self._status(("Clean-up failed: this is the live text (see steno.log)" if session.clean_failed
-                      else "Clean text:") + (f" ({notice})" if notice else ""))
+    def set_claude_enabled(self, on: bool) -> None:
         for bid in ("append", "send"):
-            self.query_one(f"#{bid}", Button).disabled = not (self.claude_pane or self.claude_panes)   # no target: both disabled
-        self._project(self.claude_default or "")
-        self.phase = "review"
-        self._show("copy", "append", "send", *again, "close")
+            self.query_one(f"#{bid}", Button).disabled = not on
 
-    # ------------------------------------------------------------ actions (keys and buttons)
+    def pick_session(self, names: list[str], callback) -> None:
+        self.push_screen(PickSession(names), callback)
+
+    # ------------------------------------------------------------ start
+    def on_mount(self) -> None:
+        self.on_mount_buttons()
+        self.set_project()
+        self.buttons()
+        self.set_interval(1.0, self.flow.tick)
+        try:                                           # `live --toggle`, or another instance, sends SIGUSR1 = stop
+            asyncio.get_running_loop().add_signal_handler(signal.SIGUSR1, self.flow.on_stop)
+        except (RuntimeError, NotImplementedError, ValueError):
+            pass
+        self.flow.start()
+
+    # ------------------------------------------------------------ user actions: keys and buttons go to the flow
     def action_stop(self) -> None:
-        if self.phase == "recording":
-            self.phase = "stopping"
-            self._status("Stopping…")
-            self.session.request_stop()
+        self.flow.on_stop()
 
-    def action_yes(self) -> None:                      # y: Copy at the button step, "Stop it" in the notice
-        if self.phase == "notice":
-            self._stop_it()
-        elif self.phase == "review" and self.session and self.session.text():
-            self._choose("copy")
+    def action_yes(self) -> None:
+        self.flow.on_yes()
 
-    def action_no(self) -> None:                       # n: Cancel in the notice
-        if self.phase == "notice":
-            self._cancel_notice()
+    def action_no(self) -> None:
+        self.flow.on_no()
 
-    def action_start(self) -> None:                    # Enter: Start, on the ready screen only (never at the button step)
-        if self.phase == "ready":
-            self._begin()
+    def action_start(self) -> None:
+        self.flow.on_start()
 
-    def action_again(self) -> None:                    # r: Start on ready, New at the button step
-        if self.phase == "ready":
-            self._begin()
-        elif self.phase == "review" and not self.popup:
-            self._choose("new")
+    def action_again(self) -> None:
+        self.flow.on_again()
 
-    def action_close(self) -> None:                    # q / Esc
-        if self.phase == "notice":
-            self._cancel_notice()
-        elif self.phase == "review":
-            self._choose("close")
-        elif self.phase in ("ready", "error"):
-            self.exit()
+    def action_close(self) -> None:
+        self.flow.on_close()
 
-    def action_append(self) -> None:                   # a: type the text + a space into Claude's input (no Enter)
-        self._claude("append")
+    def action_append(self) -> None:
+        self.flow.on_claude("append")
 
-    def action_send(self) -> None:                     # e: type the text, then press Enter (the only Enter there is)
-        self._claude("send")
-
-    def _claude(self, choice: str) -> None:
-        if self.phase != "review" or not (self.claude_pane or self.claude_panes) or not self.session or not self.session.text():
-            return
-        if self.claude_default:
-            self._choose(choice, self.claude_default, self.claude_pane)
-            return
-        self.phase = "picking"
-
-        def picked(session: str | None) -> None:
-            self.phase = "review"
-            if session:
-                self._choose(choice, session)
-
-        self.push_screen(PickSession(sorted(self.claude_panes)), picked)
-
-    def _cancel_notice(self) -> None:
-        self.other = None
-        if self.popup:
-            self.exit()
-        else:
-            self._to_ready()
-
-    def _choose(self, choice: str, claude_session: str | None = None, pane: str | None = None) -> None:
-        session = self.session
-        status = session.deliver(choice, claude_session, pane)
-        if status.startswith("FAILED"):                # keep the text on screen so it can be copied by hand
-            self.phase = "error"
-            self._status(status)
-            self._label("close", "Close q")
-            self._show("close")
-            return
-        word = {"copy": "copied", "new": "new take", "close": "closed",
-                "append": f"appended to claude {claude_session}", "send": f"sent to claude {claude_session}"}[choice]
-        self.last = (word, dt.datetime.now().strftime("%H:%M"))
-        self.session = None
-        if self.popup or choice == "close":
-            self.exit()
-        else:
-            self._to_ready()
+    def action_send(self) -> None:
+        self.flow.on_claude("send")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        bid = event.button.id
-        if bid == "start":
-            self.action_again()
-        elif bid == "stop":
-            self.action_stop()
-        elif bid == "copy":
-            self.action_yes()
-        elif bid == "append":
-            self.action_append()
-        elif bid == "send":
-            self.action_send()
-        elif bid == "new":
-            self.action_again()
-        elif bid == "close":
-            self.action_close()
-        elif bid == "stopit":
-            self._stop_it()
-        elif bid == "cancel":
-            self._cancel_notice()
+        {"start": self.flow.on_again, "stop": self.flow.on_stop, "copy": self.flow.on_yes,
+         "append": lambda: self.flow.on_claude("append"), "send": lambda: self.flow.on_claude("send"),
+         "new": self.flow.on_again, "close": self.flow.on_close, "stopit": self.flow.on_stop_it,
+         "cancel": self.flow.on_cancel}[event.button.id]()
