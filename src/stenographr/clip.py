@@ -99,21 +99,6 @@ def render_text(video: Path, start: dt.datetime, duration: float, engine: str, d
     return "\n".join(lines) + "\n"
 
 
-def write_new(directory: Path, stem: str, suffix: str, text: str) -> Path:
-    """(srt only) Create directory/stem.suffix, or stem-2.suffix, stem-3.suffix... Never overwrites
-    (exclusive create, so it is safe even against a concurrent writer)."""
-    directory.mkdir(parents=True, exist_ok=True)
-    n = 1
-    while True:
-        path = directory / (f"{stem}{suffix}" if n == 1 else f"{stem}-{n}{suffix}")
-        try:
-            with open(path, "x", encoding="utf-8") as f:
-                f.write(text)
-            return path
-        except FileExistsError:
-            n += 1
-
-
 def write_exclusive(path: Path, text: str) -> None:
     """Create path or fail (FileExistsError): a transcript exists at most once per source file."""
     path.parent.mkdir(parents=True, exist_ok=True)

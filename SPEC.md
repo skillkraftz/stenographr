@@ -31,8 +31,8 @@ Obsidian). (changed 2026-11-09)
 - Audio files are never deleted or overwritten by stenographr (a name collision gets `-2`).
 - One transcript per source file: if either its `<stem>.txt` next to the video or its archive copy
   already exists, `clip` refuses that video, prints the `rm` command to redo it and exits 1. Nothing
-  is ever overwritten and no `-2` is added. The daily file is append-only. (`srt` still writes `-2`,
-  `-3`: open, see section 1.)
+  is ever overwritten and no `-2` is added. The daily file is append-only. (`srt` replaces
+  its own `.srt`, see section 1.)
 
 ## 1. Clip transcripts (BUILT)
 - Written next to the video: `<out>/<stem>.txt` (for phone-dock, `/data/footage/clips/<date>/<stem>.txt`,
@@ -62,8 +62,8 @@ Obsidian). (changed 2026-11-09)
   In each line, the first two times are positions in the video; the third is the time of day it
   was said. Times are whole seconds.
 - `.srt` (for Kdenlive subtitle import) is NOT written automatically. `stenographr srt FILE.txt`
-  generates `FILE.srt` next to it (the parser does not depend on the extension).
-  **Open:** replace an existing `.srt` (recommended) or write `-2` (what it does now)?
+  generates `FILE.srt` next to it (the parser does not depend on the extension), prints its path, and replaces an
+  existing `.srt` atomically (temp file in the same folder, then rename).
 - In the daily file, a clip gets a single pointer line, not its full text (see section 2).
 
 ## 2. Daily file: `steno-YYYY-MM-DD.txt`

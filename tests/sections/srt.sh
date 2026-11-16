@@ -27,7 +27,9 @@ Over an hour
 EOF
 check "srt content"             'diff "$W/t.srt" "$W/t.srt.exp"'
 steno srt "$W/t.txt" >/dev/null
-check "srt never overwrites"    '[[ -f $W/t-2.srt ]] && diff "$W/t.srt" "$W/t-2.srt" >/dev/null'
+echo stale > "$W/t.srt"
+steno srt "$W/t.txt" > "$W/srt.out"
+check "srt twice: one file, replaced (stale content gone), path printed, no temp left" '[[ ! -e $W/t-2.srt ]] && [[ $(ls "$W" | grep -c "^t.*\.srt$") == 1 ]] && diff "$W/t.srt" "$W/t.srt.exp" >/dev/null && [[ $(cat "$W/srt.out") == "$W/t.srt" ]] && [[ -z $(ls -A "$W" | grep "\.tmp$") ]]'
 check "clip does not write srt" '[[ -z $(find "$OUT" "$A" -name "*.srt") ]]'
 
 

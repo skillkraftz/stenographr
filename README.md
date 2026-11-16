@@ -25,7 +25,7 @@ curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherp
 
 ```sh
 stenographr clip VIDEO... [--out DIR] [--recorded-at "YYYY-MM-DD HH:MM"] [--device cpu|gpu|auto]
-stenographr srt FILE.txt              # writes FILE.srt next to it (never automatic)
+stenographr srt FILE.txt              # writes FILE.srt next to it (replaces an existing one; never automatic)
 stenographr --version
 stenographr update                    # from any directory: git pull --ff-only the source checkout (see below)
 ```
@@ -46,7 +46,7 @@ A source file gets at most one transcript: if either file already exists, that v
 the `rm` command to redo it), the other videos still run, and the exit code is 1. Nothing is ever overwritten. A
 video with no audio stream gets a normal `.txt` whose only line is `(no audio)` (so it counts as done); one with audio
 but no speech gets the header and no lines. The model is loaded once per run, however many videos are given.
-(`srt` still adds `-2`, `-3` for now.)
+(`srt` is the exception: it replaces an existing `.srt`.)
 
 Every file `clip` handles also adds one line to the day's manifest, `<archive>/steno-YYYY-MM-DD.txt` (today's date,
 append only):
