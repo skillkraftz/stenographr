@@ -228,10 +228,10 @@ class LiveSession:
             except Exception as e:                 # noqa: BLE001
                 self.log.error(NAME, f"{choice} to claude {claude_session} failed: {type(e).__name__}: {e}")
                 problem = f"{choice} to claude failed"
+        if text and problem:                       # not finished: the take stays, the user can retry or pick another button
+            return daily.failed(problem)
         if not text:
             status = base
-        elif problem:
-            status = daily.failed(problem)
         elif base.startswith("FAILED"):
             status = base
         else:

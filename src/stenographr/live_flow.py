@@ -64,7 +64,7 @@ class LiveFlow:
     def tick(self) -> None:
         if self.state.is_in(P.RECORDING):
             s = int(time.monotonic() - self.t_start)
-            self.view.status(f"● Recording {s // 60:02d}:{s % 60:02d} · stop: s, the button, or Ctrl+`")
+            self.view.status(f"● Recording {s // 60:02d}:{s % 60:02d} · stop: s, the button, or Ctrl+` · q/Esc disabled until Stop")
 
     def _error(self, text: str) -> None:
         self.state.go(P.ERROR)
@@ -154,7 +154,7 @@ class LiveFlow:
             return
         self.state.go(P.CLEANING)
         self.view.buttons()
-        self.view.status("Cleaning up…")
+        self.view.status("Cleaning up… (q/Esc disabled until done)")
         session.clean_thread = threading.Thread(target=self._clean_main, args=(session,), daemon=True)
         session.clean_thread.start()
 
@@ -183,7 +183,10 @@ class LiveFlow:
         self.view.set_claude_enabled(bool(self.claude_pane or self.claude_panes))      # no target: both disabled
         self.view.set_project(self.claude_default or "")
         self.state.go(P.REVIEW)
-        self.view.buttons("copy", "append", "send", *again, "close")
+        self.view.buttons(*self._review_buttons())
+
+    def _review_buttons(self) -> tuple[str, ...]:
+        return ("copy", "append", "send", *(() if self.popup else ("new",)), "close")
 
     # ------------------------------------------------------------ user actions (keys and buttons)
     def on_stop(self) -> None:
@@ -250,8 +253,13 @@ class LiveFlow:
 
     def _choose(self, choice: str, claude_session: str | None = None, pane: str | None = None) -> None:
         status = self.session.deliver(choice, claude_session, pane)
-        if status.startswith("FAILED"):                # keep the text on screen so it can be copied by hand
-            self._error(status)
+        if status.startswith("FAILED"):
+            if self.session.done:                      # nothing left to retry
+                self._error(status)
+            else:                                      # a failed delivery: back to Review, text and all buttons stay
+                self.state.go(P.REVIEW)
+                self.view.status(f"{status} · try again or use another button")
+                self.view.buttons(*self._review_buttons())
             return
         word = {"copy": "copied", "new": "new take", "close": "closed",
                 "append": f"appended to claude {claude_session}", "send": f"sent to claude {claude_session}"}[choice]
