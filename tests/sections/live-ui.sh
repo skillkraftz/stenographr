@@ -31,15 +31,18 @@ async def main():
     async with app.run_test(size=(80, 25)) as pilot:
         await until(pilot, lambda: logtext(app) == ["one"])
         app._set_partial("two")                   # the last words heard, still in progress
-        app.phase = "stopping"                    # Stop pressed: the loop flushes the last line, then clears the partial
+        app.flow.state.go(Phase.STOPPING)         # Stop pressed: the loop flushes the last line, then clears the partial
         app._add_phrase("two")                    # flush(): that line is now finished
         app._set_partial("")                      # ... and the partial is cleared
         await until(pilot, lambda: len(logtext(app)) >= 2); await pilot.pause(0.2)
         print("STOPPING:", sorted(logtext(app)))   # sorted: under load the live feed can interleave
+        app._set_partial("three"); app._add_phrase("three")    # a line finishes before the next partial update arrives:
+        await pilot.pause(0.2); print("NO-DUP:", sorted(logtext(app)))   # the old partial must not show as a second "three"
         app.exit()
 asyncio.run(main())
 ' > "$W/ui.out" 2>&1
 check "screen: the last line is shown once while stopping (the cleared partial is not dropped)" 'grep -q "^STOPPING: \[.one., .two.\]$" "$W/ui.out"'
+check "screen: a finished line replaces the partial it was (between the two updates no line shows twice)" 'grep -q "^NO-DUP: \[.one., .three., .two.\]$" "$W/ui.out"'
 dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_PANES='alpha\t%0\tbash'
 runui '
 async def main():

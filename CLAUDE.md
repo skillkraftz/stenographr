@@ -15,7 +15,10 @@ downloaded once, by hand). Read the SPEC.md section for what you change, and upd
 | `src/stenographr/runner.py`, `device.py` | One engine per device per run; CPU/GPU choice with GPU->CPU fallback |
 | `src/stenographr/clip.py`, `srt.py` | Clip extraction, `.txt` writing, archive naming (`archive_rel`), manifest; `.txt` -> `.srt` |
 | `src/stenographr/dictate.py` | `_live`, the one streaming loop used by `notes` and `live`; `notes` |
-| `src/stenographr/live.py`, `live_ui.py` | `live` capture flow and the Textual screen (view only) |
+| `src/stenographr/live.py` | `LiveSession` (one capture: record, clean pass, deliver), `live --toggle`, `run` |
+| `src/stenographr/live_state.py` | The live screen's state in one place: `Phase` enum, `TRANSITIONS` (an illegal move raises), live lines + partial |
+| `src/stenographr/live_flow.py` | `LiveFlow`: the only thing that moves the state (start, record -> clean -> review, deliver); no Textual |
+| `src/stenographr/live_ui.py` | The Textual screen (view only): draws what the flow says, passes keys and buttons to it |
 | `src/stenographr/daily.py`, `recall.py` | Session blocks in the daily/notes files (writer + parser); `recall` (read-only) |
 | `src/stenographr/record.py`, `audio.py` | `pw-record` command and mic checks; session Opus audio |
 | `src/stenographr/tmuxsend.py`, `clipboard.py`, `registry.py` | Send into the Claude pane; `wl-copy`; the one-recorder-at-a-time registry |
