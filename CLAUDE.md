@@ -29,6 +29,7 @@ downloaded once, by hand). Read the SPEC.md section for what you change, and upd
 | `docs/audio-setup.md` | Scarlett/WirePlumber setup |
 | `SPEC.md` | Behaviour spec: layout, formats, what is built and open |
 | `docs/decisions/` | One file per design decision; `docs/DECISIONS.md` is its generated index, never edited by hand |
+| `docs/img/`, `docs/make-media.sh` | README pictures (GIF, PNGs) and the script that regenerates them in the lab (fake engine, fakes from `tests/fakebin`; writes only under `docs/img`) |
 | `IDEAS.md` | Open / Done ideas |
 | `tests/` | `run-tests.sh` (runs `tests/sections/*.sh` in parallel; helpers in `lib.sh`, `lib-dictation.sh`); fakes in `tests/fakebin/` (and `tests/fakeupd/` for `update`) plus a fake engine |
 | `bench/` | Benchmark script (real data, outputs to /tmp only) |
