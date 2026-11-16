@@ -2,61 +2,49 @@
 
 @.hyperbeam/RULES.md
 
-Read SPEC.md before changing behaviour; update it when behaviour changes.
+Local speech-to-text (Python): transcribe clips, dictate notes, `live` capture. Installed with
+`uv tool install --editable .`, so `stenographr` is on PATH. Runs locally; no network at runtime (models are
+downloaded once, by hand). Read the SPEC.md section for what you change, and update it when behaviour changes.
 
-Local speech-to-text (Python). Installed with `uv tool install --editable .` so `stenographr` is on PATH
-without activating a venv. Runs locally; no network at runtime (models are downloaded once, by hand).
-
-## Layout
+## Which file holds what
 | Path | What it is |
 |---|---|
-| `src/stenographr/cli.py` | `stenographr` entry point (clip, srt, notes, live, recall, keybinding, update, `--version`) |
+| `src/stenographr/cli.py` | Entry point: clip, srt, notes, live, recall, keybinding, update, `--version` |
 | `src/stenographr/config.py` | Defaults + `~/.config/stenographr/config.toml` overrides |
-| `src/stenographr/engines/` | Engine interface (`transcribe(audio) -> segments`) and implementations; `nemotron.py` = the streaming preview model of `live` (words while you talk) |
-| `src/stenographr/device.py` | CPU/GPU choice, checked before each file |
-| `src/stenographr/clip.py` | ffmpeg extraction, .txt writing, archive naming (`archive_rel`), manifest line, recording-start logic |
-| `src/stenographr/srt.py` | .txt -> .srt |
-| `src/stenographr/runner.py` | `Engines` (one engine per device per run) and the CPU/GPU decision with GPU->CPU fallback |
-| `src/stenographr/daily.py` | Session blocks in the daily/notes files (writer) and their parser |
-| `src/stenographr/clipboard.py` | `copy()`: `wl-copy` detached with no captured pipes |
-| `src/stenographr/dictate.py` | `_live` (the one streaming loop, used by notes and live), `notes` |
-| `src/stenographr/live.py` | `live`: one capture (record, clean pass, Copy/Append/Send/New/Close, end line), `live --toggle` (popups only), `stop_other`, `run` |
-| `src/stenographr/registry.py` | The instance registry `<state>/live/<pid>.json` (kind, where, recording; stale entries removed) |
-| `src/stenographr/live_ui.py` | The Textual live screen, popup and loop (view only) |
-| `src/stenographr/tmuxsend.py` | Find the Claude pane with tmux and `send-keys -l` into it (Enter only for the Send button; no hyperbeam import) |
-| `src/stenographr/record.py` | Mic node check, `pw-record` command (48 kHz), channel pick, `Down3` (48->16 kHz) |
-| `src/stenographr/audio.py` | Session audio: ffmpeg Opus encoder fed while recording, file naming |
-| `src/stenographr/update.py` | `stenographr update`: ff-only pull of the source checkout, reinstall if pyproject changed, list instances to restart |
-| `src/stenographr/recall.py` | `recall [N]` (read-only) |
-| `src/stenographr/keybind.py` | The GNOME Ctrl+` keybinding (touches only its own entry) |
-| `src/stenographr/log.py` | `<archive>/steno.log` |
-| `SPEC.md` | The spec: layout, formats, what is built and what is open |
-| `docs/decisions/` | One file per design decision (Decision / Why / Rejected); `docs/DECISIONS.md` is the generated index, never edited by hand |
+| `src/stenographr/engines/` | Engine interface (`transcribe(audio) -> segments`) and implementations; `nemotron.py` is the streaming preview model of `live` |
+| `src/stenographr/runner.py`, `device.py` | One engine per device per run; CPU/GPU choice with GPU->CPU fallback |
+| `src/stenographr/clip.py`, `srt.py` | Clip extraction, `.txt` writing, archive naming (`archive_rel`), manifest; `.txt` -> `.srt` |
+| `src/stenographr/dictate.py` | `_live`, the one streaming loop used by `notes` and `live`; `notes` |
+| `src/stenographr/live.py`, `live_ui.py` | `live` capture flow and the Textual screen (view only) |
+| `src/stenographr/daily.py`, `recall.py` | Session blocks in the daily/notes files (writer + parser); `recall` (read-only) |
+| `src/stenographr/record.py`, `audio.py` | `pw-record` command and mic checks; session Opus audio |
+| `src/stenographr/tmuxsend.py`, `clipboard.py`, `registry.py` | Send into the Claude pane; `wl-copy`; the one-recorder-at-a-time registry |
+| `src/stenographr/keybind.py`, `update.py`, `log.py` | GNOME Ctrl+` binding; `update`; `<archive>/steno.log` |
+| `SPEC.md` | Behaviour spec: layout, formats, what is built and open |
+| `docs/decisions/` | One file per design decision; `docs/DECISIONS.md` is its generated index, never edited by hand |
 | `IDEAS.md` | Open / Done ideas |
-| `docs/reviews/` | One record per review pass |
-| `tests/` | `run-tests.sh`; fakes in `tests/fakebin/` and, for `update` only, git/uv in `tests/fakeupd/` (nvidia-smi, ffmpeg (clip extraction and the Opus encoder), ffprobe, pw-record, pw-dump, wl-copy, xclip, wmctrl, gsettings, tmux, kitty) and a fake engine (offline + a fake streaming preview engine) |
+| `tests/` | `run-tests.sh`; fakes in `tests/fakebin/` (and `tests/fakeupd/` for `update`) plus a fake engine |
 | `bench/` | Benchmark script (real data, outputs to /tmp only) |
+| `system/wireplumber/` | WirePlumber rule for the two Scarlett interfaces (see README) |
 
 ## Tests
-`hyperbeam lab run --why "stenographr tests" -- bash tests/run-tests.sh` (all testing runs in the lab; offline, no model; no Docker, GPU or ports, so no exceptions). Fake `nvidia-smi` is first on PATH; the engine is a fake.
-If no python with numpy and textual is found (the lab), `run-tests.sh` makes a gitignored `.venv` with uv. It is one sequential bash script (~90 s in the lab): its sections share fakes and state, so they run in order.
+`hyperbeam lab run --why "stenographr tests" -- bash tests/run-tests.sh`. Offline: no model, GPU, network, Docker, ports,
+`/data` or real config/archive; fakes are first on PATH and never touch real GNOME settings, clipboard, tmux, kitty or PipeWire.
+If no python with numpy and textual is found, the script makes a gitignored `.venv` with uv. It is one sequential
+bash script (~90 s): its sections share fakes and state, so they run in order (this is why it is not run in parallel).
 New checks must fail on the code they guard.
 
-## Rules
-- Tests never need a model, a GPU, the network, `/data`, or the user's real config/archive.
-- Transcripts are `.txt`, never `.md`. One transcript per source file: `clip` refuses a video whose `<out>/<stem>.txt` or archive copy already exists (prints the `rm` to redo it, exit 1) and never overwrites or adds `-2`. Archive copy, flat folders: Samsung names `<archive>/clips/clip-YYYY-MM-DD-HHMMSS<suffix>.txt` (suffix = what follows the timestamp), anything else `<archive>/other/YYYY-MM-DD-<stem>.txt` (see `archive_rel`; never subfolders). A video with no audio stream gets a normal `.txt` whose body is `(no audio)`, so callers never retry it. (`srt` still uses `-2`, `-3` for now.)
-- Daily manifest `<archive>/steno-YYYY-MM-DD.txt` (date = today), append only: one line per file `clip` handled (success, `FAILED: see steno.log`, `refused: already transcribed`). A manifest write failure is logged and never fails the run.
-- Load the engine once per device per run (`Engines` in `runner.py`), never per file; `notes` loads it once per session.
-- Dictation: `notes` and `live` use `dictate._live` (recorder starts first and is read by a thread, so audio during the model load is kept). Timestamps `[HH:MM:SS]` (recording start + offset) go only in the daily/notes files, never in terminal output, typed text, clipboard or recall output. Session audio goes to `<archive>/audio/` and is never deleted or overwritten; an audio failure never stops a session (start line `audio: none`, end line `ok (audio FAILED, see steno.log)`). In a git repo, notes go to `<repo root>/steno/`. Record only from the configured mic node (never fall back to another input); `live` and `notes` default to the CPU (config `[device] device` overrides; `clip` stays auto); `live` shows a streaming preview (Nemotron streaming model, CPU, lowercase, no punctuation; `notes` never uses it) that the Parakeet clean pass replaces at stop; `live` never types into other windows (no ydotool), only one instance records at a time (registry; Ctrl+` only looks at popups), and the model is loaded once per app: it copies to the clipboard (plus a trailing space) or types one line into a Claude pane with `tmux send-keys -l`: **Claude append** adds a trailing space and sends no Enter, **Claude send** types the text and then presses Enter, and that Send button is the ONLY place Enter is ever pressed (never `s`, never Enter at the button step); the layout adapts to the pane size; `recall` only reads the daily files; the GNOME keybinding code never touches entries that aren't its own. Tests never touch the real GNOME settings, clipboard, tmux, kitty or PipeWire (fakes on PATH).
-- Read-only on `/data` except explicit benchmark outputs (which go to `/tmp/stenographr-bench`).
-- Do not modify phone-dock unless the task says so (then on its own branch in that repo).
-- Engine and model are chosen in config; don't hardcode Parakeet outside its engine module.
-- GPU: if enabling it needs sudo, a system CUDA install, or >~2 GB of downloads, stop and report.
+## Rules (details in SPEC.md)
+- Transcripts are `.txt`, never `.md`. `clip` never overwrites a transcript (refuses, prints the `rm`, exit 1). Archive folders are flat.
+- Timestamps `[HH:MM:SS]` go only in the daily/notes files, never in terminal output, typed text, clipboard or recall output.
+- Session audio in `<archive>/audio/` is never deleted or overwritten; an audio failure never stops a session.
+- Record only from the configured mic node; only one instance records at a time. `live` never types into other windows except a Claude pane via `tmux send-keys -l`; **Claude send** is the ONLY place Enter is pressed.
+- Load the engine once per device per run (`Engines`), once per session for `notes`. Don't hardcode Parakeet outside its engine module.
+- `notes` and `live` default to the CPU; `clip` stays auto. GPU: if enabling it needs sudo, a system CUDA install or >~2 GB of downloads, stop and report.
+- Read-only on `/data` except benchmark outputs (`/tmp/stenographr-bench`). Don't modify phone-dock unless the task says so.
 - Keep the repo publishable: no media, transcripts, logs, models, or personal paths/emails in files.
+- Design decisions: `docs/decisions/YYYY-MM-DD-slug.md` (format in RULES.md). SPEC.md stays the behaviour spec.
 
-## Git workflow
-- One branch per task: `feat/`, `fix/` or `chore/<short-name>`. Commit, push, open a PR against `main` with `gh`.
-- Never commit directly to `main`. Never force-push `main`.
-- PR descriptions end with a short manual test checklist of real, runnable commands.
-- The final report follows RULES.md: branch, PR URL, what changed, what was tested and how, what is untested, what to test by hand.
-- Design decisions go in their own file `docs/decisions/YYYY-MM-DD-slug.md` (format in `.hyperbeam/RULES.md`); never edit `docs/DECISIONS.md` (generated). SPEC.md stays the behaviour spec.
+## Git
+One branch per task (`feat/`, `fix/`, `chore/<name>`), PR against `main` with `gh`; never commit to `main`.
+PR descriptions end with a manual test checklist of real commands.
