@@ -315,7 +315,9 @@ class LiveApp(App):
         self._render_live()
 
     def _set_partial(self, text: str) -> None:
-        if self.phase == "recording":
+        # "stopping" too: after Stop the loop still flushes the last line and then clears the partial (""); dropping
+        # that update left the old partial on screen under the finished line, so the last line showed twice
+        if self.phase in ("recording", "stopping"):
             self._partial_text = text
             self._render_live()
 

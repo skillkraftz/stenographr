@@ -439,6 +439,22 @@ asyncio.run(main())
 check "screen: banner text, each phrase shown as recognised, only Stop visible while recording" 'grep -q "^BANNER: Live preview · final text is cleaned up when you stop" "$W/ui.out" && grep -q "^RECORDING: \[.one.\] {.start.: False, .stop.: True, .copy.: False, .append.: False, .send.: False, .new.: False, .close.: False, .stopit.: False, .cancel.: False}" "$W/ui.out"'
 check "popup, after Stop: the clean text and exactly Copy, Claude append (a), Claude send (e), Close (no New); the project name is at the right end of the bar" 'grep -q "^REVIEW: \[.Clean 15 seconds..\]" "$W/ui.out" && grep -q ".append.: (.Claude append (a)., False, True)" "$W/ui.out" && grep -q ".send.: (.Claude send (e)., False, True)" "$W/ui.out" && grep -qF "Close (q / Esc)" "$W/ui.out" && grep -q ".new.: (.New (r)., False, False)" "$W/ui.out" && grep -qx "BANNER-R: alpha" "$W/ui.out"'
 check "clicking Claude send: the text typed to %0, then one Enter; the window exits; end line sent to claude alpha" 'grep -q "^EXITED" "$W/ui.out" && [[ $(grep -c "^send-keys|" "$W/tmux.log") == 2 ]] && grep -qxF "send-keys|-t|%0|-l|--|Clean 15 seconds.|" "$W/tmux.log" && grep -qxF "send-keys|-t|%0|Enter|" "$W/tmux.log" && tail -1 "$DAILY" | grep -qE "· ok · sent to claude alpha$"'
+dfresh; mkdir -p "$W/gate"
+runui '
+async def main():
+    app = LiveApp(cfg, log, "cpu", popup=True)
+    async with app.run_test(size=(80, 25)) as pilot:
+        await until(pilot, lambda: logtext(app) == ["one"])
+        app._set_partial("two")                   # the last words heard, still in progress
+        app.phase = "stopping"                    # Stop pressed: the loop flushes the last line, then clears the partial
+        app._add_phrase("two")                    # flush(): that line is now finished
+        app._set_partial("")                      # ... and the partial is cleared
+        await pilot.pause(0.2)
+        print("STOPPING:", logtext(app))
+        app.exit()
+asyncio.run(main())
+' > "$W/ui.out" 2>&1
+check "screen: the last line is shown once while stopping (the cleared partial is not dropped)" 'grep -q "^STOPPING: \[.one., .two.\]$" "$W/ui.out"'
 dfresh; mkdir -p "$W/gate"; export FAKE_TMUX_PANES='alpha\t%0\tbash'
 runui '
 async def main():
