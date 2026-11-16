@@ -58,10 +58,25 @@ print("STOPPING-DRAWN:", view.drawn[-2:], flow.phase)
 flow.state.go(Phase.CLEANING)
 n = len(view.drawn); flow.set_partial("late")
 print("AFTER-STOP-IGNORED:", len(view.drawn) == n)
+
+# 7. STENO_STRICT unset: an illegal move is logged and ignored, never raised; STENO_STRICT=1 raises
+import os
+class L:
+    def __init__(self): self.w = []
+    def warn(self, name, msg): self.w.append((name, msg))
+lg = L(); s = LiveState(lg); s.go(Phase.READY)
+os.environ.pop("STENO_STRICT", None)
+r = s.go(Phase.REVIEW)
+print("LENIENT:", r, s.phase, lg.w)
+os.environ["STENO_STRICT"] = "1"
+try: s.go(Phase.REVIEW); print("STRICT: no raise")
+except IllegalTransition: print("STRICT: raised", s.phase, len(lg.w))
 PY
 check "table: every transition outside TRANSITIONS raises and leaves the phase alone, every one inside works; error is the end" 'grep -qx "TABLE-BAD: \[\]" "$W/st.out" && grep -qx "ERROR-IS-THE-END: True" "$W/st.out"'
 check "the loop path and the popup path (incl. picking and error) are allowed; no phase can be skipped" 'grep -qx "PATHS: ok" "$W/st.out" && grep -qx "NO-SKIP: True" "$W/st.out"'
 check "partial updates are taken while recording and stopping only" '[[ $(grep -c "^PARTIAL-.*: taken want taken$" "$W/st.out") == 2 && $(grep -c "^PARTIAL-.*: ignored want ignored$" "$W/st.out") == 4 ]]'
 check "a finished line clears the stale partial (no duplicate line between the two updates)" 'grep -qx "STALE-PARTIAL: \[.one., .two.\] .." "$W/st.out"'
 check "flow, stopping: the last line and the cleared partial both reach the screen; after stop a late partial does not" 'grep -qx "STOPPING-DRAWN: \[(\[.one., .two.\], ..), (\[.one., .two.\], ..)\] stopping" "$W/st.out" && grep -qx "AFTER-STOP-IGNORED: True" "$W/st.out"'
+check "STENO_STRICT unset: an illegal move is warned in the app log and ignored (phase kept); STENO_STRICT=1: it raises, with no extra warning" 'grep -qx "LENIENT: False ready \[(.live., .illegal phase move ready -> review ignored.)\]" "$W/st.out" && grep -qx "STRICT: raised ready 1" "$W/st.out"'
+check "run-tests.sh sets STENO_STRICT=1 for every section" 'grep -q "^export STENO_STRICT=1" "$HERE/run-tests.sh"'
 echo; echo "$pass passed, $fail failed"; [[ $fail == 0 ]]

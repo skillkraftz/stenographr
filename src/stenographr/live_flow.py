@@ -23,7 +23,7 @@ class LiveFlow:
     def __init__(self, cfg, log, requested: str, popup: bool, view):
         self.cfg, self.slog, self.requested, self.popup, self.view = cfg, log, requested, popup, view
         self.engines = Engines(cfg, log)           # one model for the app's whole life
-        self.state = LiveState()
+        self.state = LiveState(log)
         self.session: LiveSession | None = None
         self.entry = None                          # registry.Entry (set by live.run)
         self.last: tuple[str, str] | None = None   # (what happened, HH:MM) of the previous capture

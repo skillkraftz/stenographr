@@ -1,7 +1,9 @@
 """The state of one live session in one place: the phases, the transitions that are allowed, and the text on screen.
 
 The screen (live_ui.py) only renders this state and sends user actions; the flow (live_flow.py) is the only thing
-that changes it. A transition that is not in TRANSITIONS raises, so a wrong move is a loud bug, not a dropped update.
+that changes it. A transition that is not in TRANSITIONS raises when STENO_STRICT=1 (the tests), so a wrong move is a
+loud bug there; otherwise it is logged as a warning and ignored: a bug must never crash the app someone is dictating
+with (a crash loses their words).
 
   starting -> ready (loop) | notice | recording (popup) | error
   ready -> notice | recording | ready (cannot record: back to ready with a message)
@@ -13,6 +15,7 @@ A popup never visits `ready`; Close / any popup choice exits the app from `revie
 """
 from __future__ import annotations
 
+import os
 from enum import Enum
 
 
@@ -54,15 +57,22 @@ class IllegalTransition(Exception):
 class LiveState:
     """The phase plus the live text of the capture in progress."""
 
-    def __init__(self) -> None:
+    def __init__(self, log=None) -> None:
+        self.log = log                         # the app log (Log): where an ignored illegal move is reported
         self.phase = P.STARTING
         self.lines: list[str] = []             # finished live lines
         self.partial = ""                      # the line in progress
 
-    def go(self, new: Phase) -> None:
+    def go(self, new: Phase) -> bool:
+        """Move to `new`. An illegal move raises with STENO_STRICT=1, else it is logged and ignored (returns False)."""
         if new not in TRANSITIONS[self.phase]:
-            raise IllegalTransition(f"{self.phase} -> {new}")
+            if os.environ.get("STENO_STRICT") == "1":
+                raise IllegalTransition(f"{self.phase} -> {new}")
+            if self.log:
+                self.log.warn("live", f"illegal phase move {self.phase} -> {new} ignored")
+            return False
         self.phase = new
+        return True
 
     def is_in(self, *phases: Phase) -> bool:
         return self.phase in phases
