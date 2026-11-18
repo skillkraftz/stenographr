@@ -77,7 +77,9 @@ h2{font-size:.85rem;text-transform:uppercase;letter-spacing:.06em;color:var(--mu
 .note{background:var(--card);border:1px solid var(--line);border-radius:.7rem;padding:.6rem .8rem;margin-bottom:.5rem;min-width:0}
 .meta{display:flex;gap:.5rem;flex-wrap:wrap;font-size:.8rem;color:var(--mut)}
 .st-done{color:var(--ok)}.st-failed{color:var(--red)}
-.text{margin-top:.3rem;overflow-wrap:anywhere;white-space:pre-wrap}
+.text{margin-top:.3rem;overflow-wrap:anywhere;white-space:pre-wrap;-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
+.copy{display:block;width:100%;margin-top:.6rem;padding:.85rem;border-radius:.6rem;border:0;background:var(--fg);color:var(--bg);font:inherit;font-size:1.1rem;font-weight:600;touch-action:manipulation}
+.copy.did{background:var(--ok);color:#fff}
 </style></head><body><main>
 <section class="rec">
   <button id="btn" type="button">Record</button>
@@ -198,11 +200,34 @@ function render(){
   }
   for (const n of server.slice().reverse()){
     const st = n.status === 'done' ? '' : n.status === 'failed' ? 'transcription failed (audio is kept)' : n.status === 'working' ? 'transcribing…' : 'in the queue';
+    const did = copied.get(n.id) > Date.now();
     rows.push(`<div class="note"><div class="meta"><span>${esc(n.time)}</span>${n.title && n.title !== 'unknown' ? '<b>' + esc(n.title) + '</b>' : ''}
-      ${st ? '<span class="st-' + n.status + '">' + st + '</span>' : ''}</div>${n.text ? '<div class="text">' + esc(n.text) + '</div>' : ''}</div>`);
+      ${st ? '<span class="st-' + n.status + '">' + st + '</span>' : ''}</div>${n.text ? '<div class="text" id="t-' + esc(n.id) + '">' + esc(n.text) + '</div><button type="button" class="copy' + (did ? ' did' : '') + '" data-id="' + esc(n.id) + '">' + (did ? 'Copied' : 'Copy') + '</button>' : ''}</div>`);
   }
-  listEl.innerHTML = rows.join('') || '<div class="note meta">No phone notes yet today.</div>';
+  const html = rows.join('') || '<div class="note meta">No phone notes yet today.</div>';
+  if (html === lastHtml) return;
+  const sel = window.getSelection();                    // do not rebuild the list under a text selection the user is making
+  if (sel && !sel.isCollapsed && listEl.contains(sel.anchorNode)) return;
+  lastHtml = html; listEl.innerHTML = html;
 }
+let lastHtml = null;
+const copied = new Map();                               // note id -> until when its button says "Copied"
+async function copyNote(id){
+  const n = server.find(x => x.id === id), el = document.getElementById('t-' + id);
+  if (!n) return;
+  let ok = false;
+  try { await navigator.clipboard.writeText(n.text); ok = true; } catch (e) {}
+  if (!ok && el){                                       // the browser refused: select the text so a long-press Copy works
+    const r = document.createRange(); r.selectNodeContents(el);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    try { ok = document.execCommand('copy'); } catch (e) {}
+    say(ok ? '' : 'Could not copy: the text is selected, use Copy in the phone menu.', !ok);
+    if (!ok) return;
+  }
+  copied.set(id, Date.now() + 1800); render();
+  setTimeout(render, 1850);
+}
+listEl.addEventListener('click', e => { const b = e.target.closest('.copy'); if (b) copyNote(b.dataset.id); });
 let polling = null;
 async function poll(){
   clearTimeout(polling);

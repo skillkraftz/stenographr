@@ -106,6 +106,10 @@ require for the microphone. Tailnet only, never Funnel.
 The upload returns at once; the text appears in the page's list when the transcription is done (CPU, same engine as `notes`). The page keeps
 the recording, retrying, until the server has saved it, even across a page reload. The original recording is kept as sent
 (`audio/<start>-phone.webm` from Android, `.m4a` from iPhone). If the transcription fails the audio stays and the daily block says `FAILED`.
+Each note's **Copy** button (under its text, newest first) puts the text on the phone's clipboard to paste into other apps; the text can also be
+selected by long-press. Every finished note is also a plain text file with its time, title, duration and audio path:
+`<archive>/phone/YYYY-MM-DD/HH-MM-SS[-title].txt` (default `/data/transcripts/phone/...`). Notes that already exist get their file when the
+server starts, or with `stenographr phone --backfill`; an existing file is never overwritten.
 To have the service start without you being logged in, run `loginctl enable-linger $USER` once.
 
 ## update

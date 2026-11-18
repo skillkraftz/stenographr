@@ -27,9 +27,9 @@ Obsidian).
     2026-11-09-112850-notes.opus      <session start>-<mode>.opus, mono 48 kHz Opus 96 kbps
     2026-11-10-200600-live.opus
     2026-11-18-101530-phone.webm      a phone note, as the phone sent it (.webm Android, .m4a iPhone)
-  phone/                              `phone` only: one <note id>.json per note (status, text), see section 7
+  phone/                              `phone` only: one <note id>.json per note (status, text) and a YYYY-MM-DD/ folder per day with each note as .txt, see section 7
 ```
-- Files sit loose in the folder. The only subfolders are `clips/`, `other/`, `audio/` and (only if `phone` is used) `phone/`, all flat.
+- Files sit loose in the folder. The only subfolders are `clips/`, `other/`, `audio/` and (only if `phone` is used) `phone/`, all flat (`phone/` also holds the per-day folders of note text files).
 - Audio files are never deleted or overwritten by stenographr (a name collision gets `-2`).
 - One transcript per source file: if either its `<stem>.txt` next to the video or its archive copy
   already exists, `clip` refuses that video, prints the `rm` command to redo it and exits 1. Nothing
@@ -338,6 +338,7 @@ Built: dictate on the phone, the note and its audio land here. A web server insi
   `recall` shows phone notes like other sessions. A phone block can land inside a laptop session that is still open (two writers, one file): the parser reads it as its own session and the open one continues after it.
 - **Page:** one screen, phone first: a Record/Stop button (MediaRecorder: webm/opus, or mp4/aac on iPhone), a timer, an optional title field, today's phone notes with their text.
   A recording stays in the page (and in IndexedDB, surviving a reload) and is re-sent with growing delays until the server says it is saved; an upload that hangs is given up after 1 min + 30 s per MB, and a retry is made at once when the page comes back to the foreground or the network returns. Manifest + icons: "Add to Home Screen".
+- **Copy and text files:** each note with text has a **Copy** button (navigator.clipboard; if refused the text is selected and `execCommand('copy')` tried, else the user is told to use the phone's Copy) that says "Copied" for ~2 s; the page does not rebuild the list under a text selection. When a transcription finishes `ok` (also "no speech"), the note is written to `<archive>/phone/YYYY-MM-DD/HH-MM-SS[-title-slug].txt` (title slugged to a-z0-9 and `-`, max 40; none for `unknown`): first line `YYYY-MM-DD HH:MM:SS · <title, if any> · <duration> · <absolute audio path>`, a blank line, the text. Atomic (temp file, then a hard link that fails if the name exists: never overwritten). A failed note writes none; the daily-file block is unchanged. Missing files of `done` notes (any day) are written at server start and by `phone --backfill` (prints the count, exits).
 - **Setup:** `phone --tailscale [on|off]` runs `tailscale serve --bg --https=443 http://127.0.0.1:<port>` / `tailscale serve --https=443 off` and prints the phone URL; if tailscale refuses
   for lack of operator rights it prints `sudo tailscale set --operator=$USER` and exits 1. `phone --install` / `--remove`: a systemd user service `stenographr-phone.service` (opt-in; `Restart=on-failure`, 10 s apart, so a /data that is not mounted yet is retried).
 - Not built: authentication, a retry button for failed notes, notes older than today in the page (they are in the daily file).

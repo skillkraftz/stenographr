@@ -165,6 +165,8 @@ def cmd_phone(args) -> int:
         return phone_ctl.tailscale(args.tailscale, port)
     if not _archive_ok(cfg):
         return 1
+    if args.backfill:
+        return phone.backfill(cfg, log)
     return phone.run(cfg, log, args.device or _dictation_device(cfg), args.port, _version())
 
 
@@ -235,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     ph.add_argument("--remove", action="store_true", help="stop and remove that service")
     ph.add_argument("--tailscale", nargs="?", const="on", choices=["on", "off"],
                     help="`tailscale serve` the page on the tailnet (HTTPS, never Funnel); `off` undoes it")
+    ph.add_argument("--backfill", action="store_true", help="write the text file (<archive>/phone/<day>/) of every finished note that lacks one, then exit (also done at server start)")
     ph.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: cpu (config [device] device overrides)")
     ph.set_defaults(fn=cmd_phone)
     u = sub.add_parser("update", help="git pull --ff-only the source checkout (clean main only); reinstall if pyproject changed")
