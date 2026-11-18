@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Section: phone (the web server for dictating on a phone). Run alone: tests/run-tests.sh phone
+. "$(dirname "$(readlink -f "$0")")/../lib.sh"
+echo "== phone"
+# The real ffmpeg makes the fixtures and decodes them (the fake one ignores its input): a private bin dir before the fakes.
+REALFF=$(PATH=${PATH#"$FB":} command -v ffmpeg); REALFP=$(PATH=${PATH#"$FB":} command -v ffprobe)
+mkdir -p "$W/fx" "$W/realbin"
+if [[ -n $REALFF ]]; then
+  ln -s "$REALFF" "$W/realbin/ffmpeg"; [[ -n $REALFP ]] && ln -s "$REALFP" "$W/realbin/ffprobe"
+  export PATH=$W/realbin:$PATH
+  ffmpeg -v error -y -f lavfi -i "sine=frequency=440:duration=2" -c:a libopus "$W/fx/android.webm"
+  ffmpeg -v error -y -f lavfi -i "sine=frequency=440:duration=2" -c:a aac "$W/fx/iphone.mp4"
+else
+  echo "  (no real ffmpeg here: the fixtures are placeholder bytes and the fake ffmpeg 'decodes' them)"
+  head -c 3000 /dev/urandom > "$W/fx/android.webm"; head -c 3000 /dev/urandom > "$W/fx/iphone.mp4"; export FAKE_FF_SECONDS=2
+fi
+head -c 2500000 /dev/zero > "$W/fx/big.webm"
+DAY=$(date +%F); DAILY=$A/steno-$DAY.txt
+export FAKE_ENGINE_CLEAN_TEXT="Phone note text."
+BIGCONF=$'[phone]\nmax_mb = 1'
+
+SPID=
+start() {      # start [extra config]: the server on a free port; sets $URL
+  mkconf "$1"; : > "$W/srv.out"
+  steno phone --port 0 > "$W/srv.out" 2> "$W/srv.err" & SPID=$!
+  for _ in $(seq 100); do grep -q "listening on" "$W/srv.out" && break; sleep 0.1; done
+  PORT=$(grep -o ':[0-9]*  ' "$W/srv.out" | tr -d ': '); URL=http://127.0.0.1:$PORT
+}
+stop() { [[ -n $SPID ]] && kill "$SPID" 2>/dev/null; wait "$SPID" 2>/dev/null; SPID=; }
+post() {       # post FILE ID CONTENT-TYPE [TITLE] [SECONDS]: prints the HTTP status
+  curl -s -o "$W/post.out" -w '%{http_code}' -X POST --data-binary "@$1" -H "Content-Type: $3" -H "X-Note-Id: $2" \
+       -H "X-Title: $(printf %s "${4:-}" | "$PY" -c 'import sys,urllib.parse as u; print(u.quote(sys.stdin.read()))')" -H "X-Duration: ${5:-2}" "$URL/api/notes"
+}
+field() {      # field ID NAME: one field of today's note list
+  curl -s "$URL/api/notes" | "$PY" -c 'import sys,json; print(next((n[sys.argv[2]] for n in json.load(sys.stdin) if n["id"]==sys.argv[1]), ""))' "$1" "$2"
+}
+waitfor() {    # waitfor ID STATUS: until the note has that status (max 20 s)
+  for _ in $(seq 200); do [[ $(field "$1" status) == "$2" ]] && return 0; sleep 0.1; done; return 1
+}
+
+# ---- upload: audio saved, text appended in the session format
+fresh; start ""
+check "listens on 127.0.0.1 only" 'ss -ltn | grep -q "127.0.0.1:$PORT " && ! ss -ltn | grep -qE "(0.0.0.0|\*|\[::\]):$PORT "'
+check "GET / serves the page, manifest and icon" '[[ $(curl -s $URL/ | grep -c "MediaRecorder") -ge 1 && $(curl -s $URL/manifest.webmanifest | grep -c standalone) == 1 && $(curl -s $URL/icon-192.png | head -c 4 | tail -c 3) == PNG ]]'
+check "Android webm: 200, audio kept as sent in audio/*-phone.webm" '[[ $(post "$W/fx/android.webm" aaaaaaaa-0001 audio/webm "Shopping list") == 200 ]] && [[ $(ls "$A/audio" | grep -cE "^[0-9-]{17}-phone\.webm$") == 1 ]] && cmp -s "$W/fx/android.webm" "$A"/audio/*-phone.webm'
+check "Android webm: transcribed, state done, text in the list" 'waitfor aaaaaaaa-0001 done && [[ $(field aaaaaaaa-0001 text) == "Phone note text." ]]'
+check "daily file: one phone block, in the format of the other sessions" '[[ $(grep -c "^start:" "$DAILY") == 1 ]] && grep -qE "^start: $DAY [0-9:]{8} · phone · Shopping list · audio/[0-9-]{17}-phone\.webm$" "$DAILY" && grep -qE "^\[[0-9:]{8}\] Phone note text\.$" "$DAILY" && tail -1 "$DAILY" | grep -qE "^end: $DAY [0-9:]{8} · 2s · ok$"'
+check "recall's parser reads the block (mode phone, audio, text)" '"$PY" -c "
+import sys; from stenographr import daily
+p = daily.parse_sessions(open(sys.argv[1]).read())
+assert len(p)==1 and p[0].mode==\"phone\" and p[0].where==\"Shopping list\" and p[0].audio.endswith(\"-phone.webm\") and p[0].text==\"Phone note text.\" and p[0].status==\"ok\", p
+" "$DAILY"'
+check "iPhone mp4 (aac): 200, kept as audio/*-phone.m4a, transcribed" '[[ $(post "$W/fx/iphone.mp4" bbbbbbbb-0002 audio/mp4) == 200 ]] && waitfor bbbbbbbb-0002 done && ls "$A/audio" | grep -qE "^[0-9-]{17}-phone(-2)?\.m4a$" && [[ $(grep -c "^start:" "$DAILY") == 2 ]] && grep -q " · phone · unknown · audio/" "$DAILY"'
+check "the same note id again (a retry): answered, nothing saved twice" '[[ $(post "$W/fx/iphone.mp4" bbbbbbbb-0002 audio/mp4) == 200 ]] && [[ $(ls "$A/audio" | wc -l) == 2 && $(grep -c "^start:" "$DAILY") == 2 ]]'
+check "steno.log has the upload and the finish" 'grep -q "INFO  aaaaaaaa-0001 upload saved: audio/" "$LOG" && grep -q "INFO  aaaaaaaa-0001 finish: 1 lines, ok" "$LOG"'
+check "no upload leftovers in phone/" '[[ -z $(ls -A "$A/phone" | grep -v "\.json$") ]]'
+
+# ---- refusals
+check "an upload over the limit is refused with 413 and nothing is saved" 'stop; fresh; start "$BIGCONF"; [[ $(post "$W/fx/big.webm" cccccccc-0003 audio/webm) == 413 ]] && [[ ! -d $A/audio || -z $(ls -A "$A/audio") ]] && [[ ! -e $DAILY ]]'
+check "other paths and methods are refused (404/405), a bad note id is 400" '[[ $(curl -s -o /dev/null -w %{http_code} $URL/etc/passwd) == 404 && $(curl -s -o /dev/null -w %{http_code} -X POST -d x $URL/other) == 404 && $(curl -s -o /dev/null -w %{http_code} -X DELETE $URL/api/notes) == 405 && $(curl -s -o /dev/null -w %{http_code} -X POST -d x -H "X-Note-Id: ../x" $URL/api/notes) == 400 ]]'
+
+# ---- queue order: three notes in a row come out in the order they were uploaded
+stop; fresh; printf 'first note\nsecond note\nthird note\n' > "$W/seq"; export FAKE_ENGINE_CLEAN_SEQ=$W/seq FAKE_ENGINE_CLEAN_DELAY=0.4 FAKE_ENGINE_COUNT=$W/engines
+start ""
+for i in 1 2 3; do post "$W/fx/android.webm" "dddddddd-000$i" audio/webm "n$i" >/dev/null; done
+check "queue: the list shows them waiting or working before the first is done" '[[ $(curl -s $URL/api/notes | grep -cE "queued|working") -ge 1 ]]'
+check "queue: all three done, texts in upload order in the daily file" 'waitfor dddddddd-0003 done && [[ $(grep -E "^\[" "$DAILY" | sed "s/^\[[0-9:]*\] //" | tr "\n" "|") == "first note|second note|third note|" ]] && [[ $(grep "^start:" "$DAILY" | grep -o "· n[123] ·" | tr -d "\n") == "· n1 ·· n2 ·· n3 ·" ]]'
+check "queue: the model is loaded once for the burst, not once per note" '[[ $(wc -l < "$W/engines") -le 2 ]]'
+unset FAKE_ENGINE_CLEAN_SEQ FAKE_ENGINE_CLEAN_DELAY FAKE_ENGINE_COUNT
+
+# ---- a failed transcription keeps the audio and marks the note
+stop; fresh; FAKE_ENGINE_FAIL=1 start ""
+post "$W/fx/android.webm" eeeeeeee-0004 audio/webm "Will fail" >/dev/null
+check "failed transcription: note marked failed, audio kept, FAILED block in the daily file, reason in steno.log" 'waitfor eeeeeeee-0004 failed && ls "$A"/audio/*-phone.webm >/dev/null && tail -1 "$DAILY" | grep -qE "· FAILED: transcription failed, see steno.log$" && grep -q "ERROR eeeeeeee-0004 RuntimeError: fake model load failure" "$LOG"'
+check "failed note: the server keeps serving" '[[ $(curl -s -o /dev/null -w %{http_code} $URL/api/notes) == 200 ]]'
+
+# ---- a restart picks up what was still queued
+stop; fresh; mkdir -p "$A/audio" "$A/phone"; cp "$W/fx/android.webm" "$A/audio/$DAY-101010-phone.webm"
+printf '{"id": "ffffffff-0005", "start": "%sT10:10:10", "title": "Left over", "seconds": 2.0, "audio": "audio/%s-101010-phone.webm", "status": "working", "text": "", "error": ""}' "$DAY" "$DAY" > "$A/phone/ffffffff-0005.json"
+start ""
+check "restart: a note left queued/working is transcribed" 'waitfor ffffffff-0005 done && grep -q "^start: $DAY 10:10:10 · phone · Left over · audio/$DAY-101010-phone.webm$" "$DAILY"'
+stop
+
+# ---- phone --install / --remove / --tailscale
+export XDG_CONFIG_HOME=$W/xdg FAKE_SYSTEMCTL_LOG=$W/sysctl.log FAKE_TS_LOG=$W/ts.log; : > "$W/sysctl.log"; : > "$W/ts.log"
+steno phone --install > "$W/inst.out" 2>&1; echo $? > "$W/rc"
+U=$XDG_CONFIG_HOME/systemd/user/stenographr-phone.service
+check "--install: unit written (runs 'stenographr ... phone'), enabled and started" '[[ $(cat "$W/rc") == 0 ]] && grep -qE "^ExecStart=.*stenographr phone$" "$U" && grep -q "enable --now stenographr-phone.service" "$W/sysctl.log"'
+steno phone --remove > "$W/rem.out" 2>&1
+check "--remove: service disabled, unit file gone; remove again says not installed" '[[ ! -e $U ]] && grep -q "disable --now stenographr-phone.service" "$W/sysctl.log" && steno phone --remove | grep -q "not installed"'
+steno phone --tailscale > "$W/ts.out" 2>&1; echo $? > "$W/rc"
+check "--tailscale: serve --bg --https=443 http://127.0.0.1:3111 (no funnel), prints the phone URL" '[[ $(cat "$W/rc") == 0 ]] && grep -qx "serve --bg --https=443 http://127.0.0.1:3111" "$W/ts.log" && ! grep -qi funnel "$W/ts.log" && grep -q "https://fake-host.tail0000.ts.net/" "$W/ts.out"'
+steno phone --tailscale off > "$W/ts.out" 2>&1
+check "--tailscale off: serve --https=443 off" 'grep -qx "serve --https=443 off" "$W/ts.log"'
+FAKE_TS_DENY=1 steno phone --tailscale > "$W/ts.out" 2>&1; echo $? > "$W/rc"
+check "--tailscale without operator rights: exit 1 and prints the sudo command" '[[ $(cat "$W/rc") == 1 ]] && grep -qF "sudo tailscale set --operator=\$USER" "$W/ts.out"'
+
+echo; echo "$pass passed, $fail failed"; [[ $fail == 0 ]]

@@ -89,6 +89,24 @@ refused with the `rm` to redo it (exit 1), nothing is overwritten. A video witho
 `stenographr keybinding install` adds the GNOME shortcut Ctrl+` = `stenographr live --toggle`; `remove` deletes only that entry.
 It is global, so it takes Ctrl+` from apps that use it.
 
+## Dictate from your phone
+
+`stenographr phone` is a small web page for dictating on the phone: the note lands in the day's file and its audio in `audio/`, like laptop
+dictation (mode `phone`). It listens on `127.0.0.1:3111` only; your phone reaches it over Tailscale, which provides the HTTPS that phones
+require for the microphone. Tailnet only, never Funnel.
+
+1. One time, if `tailscale serve` says access denied: `sudo tailscale set --operator=$USER`.
+2. `stenographr phone --tailscale` runs `tailscale serve --bg --https=443 http://127.0.0.1:3111` and prints the phone URL
+   (`https://<this machine>.<your tailnet>.ts.net/`). `stenographr phone --tailscale off` undoes it.
+3. Start the server: `stenographr phone` in a terminal, or, to have it always running, `stenographr phone --install`
+   (a systemd user service; `stenographr phone --remove` removes it).
+4. On the phone (Tailscale on) open the URL, allow the microphone, tap **Record** / **Stop**; the optional title field becomes the note's
+   `where` in the daily file. Add it to the home screen (browser menu: *Add to Home Screen*) to use it like an app.
+
+The upload returns at once; the text appears in the page's list when the transcription is done (CPU, same engine as `notes`). The page keeps
+the recording, retrying, until the server has saved it, even across a page reload. The original recording is kept as sent
+(`audio/<start>-phone.webm` from Android, `.m4a` from iPhone). If the transcription fails the audio stays and the daily block says `FAILED`.
+
 ## update
 
 `stenographr update` fast-forwards the source checkout (only a clean `main`), reinstalls if `pyproject.toml` changed, and lists the running
@@ -109,6 +127,9 @@ device = "auto"            # `live` and `notes` default to cpu
 [dictation]
 mic = "scarlett-mic"
 channel = 1
+[phone]
+port = 3111                # `stenographr phone`
+max_mb = 200               # largest upload
 ```
 
 ## More

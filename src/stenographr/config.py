@@ -32,6 +32,9 @@ class Config:
     vram_margin_mib: int = 500
     max_gpu_util_pct: int = 30
     busy_processes: list[str] = field(default_factory=lambda: list(DEFAULT_BUSY))
+    # [phone] (keys `port`, `max_mb`)
+    phone_port: int = 3111        # `stenographr phone` listens on 127.0.0.1 only; tailscale serve is the way in
+    phone_max_mb: int = 200       # largest upload accepted
 
 
 _SECTIONS = {
@@ -39,6 +42,7 @@ _SECTIONS = {
     "engine": {"engine", "num_threads", "batch_size"},
     "dictation": {"mic", "channel"},
     "device": {"device", "vram_need_mib", "vram_margin_mib", "max_gpu_util_pct", "busy_processes"},
+    "phone": {"port", "max_mb"},
 }
 
 
@@ -55,6 +59,8 @@ def load(path: str | os.PathLike | None = None) -> Config:
         for k, v in keys.items():
             if k == "name" and section == "engine":
                 k = "engine"
+            if section == "phone":
+                k = "phone_" + k
             if k not in known:
                 raise ValueError(f"{p}: unknown key [{section}] {k}")
             if k in ("models", "archive"):
