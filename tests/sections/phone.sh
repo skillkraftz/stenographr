@@ -42,6 +42,7 @@ waitfor() {    # waitfor ID STATUS: until the note has that status (max 20 s)
 fresh; start ""
 check "listens on 127.0.0.1 only" 'ss -ltn | grep -q "127.0.0.1:$PORT " && ! ss -ltn | grep -qE "(0.0.0.0|\*|\[::\]):$PORT "'
 check "GET / serves the page, manifest and icon" '[[ $(curl -s $URL/ | grep -c "MediaRecorder") -ge 1 && $(curl -s $URL/manifest.webmanifest | grep -c standalone) == 1 && $(curl -s $URL/icon-192.png | head -c 4 | tail -c 3) == PNG ]]'
+check "the page has a Copy button per note and selectable text" 'curl -s $URL/ | grep -q "class=\"copy" && curl -s $URL/ | grep -q "user-select:text"'
 check "Android webm: 200, audio kept as sent in audio/*-phone.webm" '[[ $(post "$W/fx/android.webm" aaaaaaaa-0001 audio/webm "Shopping list") == 200 ]] && [[ $(ls "$A/audio" | grep -cE "^[0-9-]{17}-phone\.webm$") == 1 ]] && cmp -s "$W/fx/android.webm" "$A"/audio/*-phone.webm'
 check "Android webm: transcribed, state done, text in the list" 'waitfor aaaaaaaa-0001 done && [[ $(field aaaaaaaa-0001 text) == "Phone note text." ]]'
 check "daily file: one phone block, in the format of the other sessions" '[[ $(grep -c "^start:" "$DAILY") == 1 ]] && grep -qE "^start: $DAY [0-9:]{8} · phone · Shopping list · audio/[0-9-]{17}-phone\.webm$" "$DAILY" && grep -qE "^\[[0-9:]{8}\] Phone note text\.$" "$DAILY" && tail -1 "$DAILY" | grep -qE "^end: $DAY [0-9:]{8} · 2s · ok$"'
@@ -53,7 +54,7 @@ assert len(p)==1 and p[0].mode==\"phone\" and p[0].where==\"Shopping list\" and 
 check "iPhone mp4 (aac): 200, kept as audio/*-phone.m4a, transcribed" '[[ $(post "$W/fx/iphone.mp4" bbbbbbbb-0002 audio/mp4) == 200 ]] && waitfor bbbbbbbb-0002 done && ls "$A/audio" | grep -qE "^[0-9-]{17}-phone(-2)?\.m4a$" && [[ $(grep -c "^start:" "$DAILY") == 2 ]] && grep -q " · phone · unknown · audio/" "$DAILY"'
 check "the same note id again (a retry): answered, nothing saved twice" '[[ $(post "$W/fx/iphone.mp4" bbbbbbbb-0002 audio/mp4) == 200 ]] && [[ $(ls "$A/audio" | wc -l) == 2 && $(grep -c "^start:" "$DAILY") == 2 ]]'
 check "steno.log has the upload and the finish" 'grep -q "INFO  aaaaaaaa-0001 upload saved: audio/" "$LOG" && grep -q "INFO  aaaaaaaa-0001 finish: 1 lines, ok" "$LOG"'
-check "no upload leftovers in phone/" '[[ -z $(ls -A "$A/phone" | grep -v "\.json$") ]]'
+check "no upload leftovers in phone/" '[[ -z $(ls -A "$A/phone" | grep -vE "\.json$|^[0-9]{4}-") ]]'
 
 # ---- refusals
 check "an upload over the limit is refused with 413 and nothing is saved" 'stop; fresh; start "$BIGCONF"; [[ $(post "$W/fx/big.webm" cccccccc-0003 audio/webm) == 413 ]] && [[ ! -d $A/audio || -z $(ls -A "$A/audio") ]] && [[ ! -e $DAILY ]]'
@@ -99,7 +100,7 @@ s.sendall(b"POST /api/notes HTTP/1.1\r\nHost: x\r\nX-Note-Id: hhhhhhhh-0010\r\nC
 s.close()
 PY
 "$PY" "$W/cut.py" "$PORT"; sleep 0.5
-check "a connection cut half way: nothing saved, no leftover, no traceback, the server keeps serving, a retry works" '[[ -z $(ls -A "$A/phone" | grep -v "\.json$") && ! -e $A/phone/hhhhhhhh-0010.json && $(ls "$A/audio" | wc -l) == 3 ]] && ! grep -q Traceback "$W/srv.err" && [[ $(post "$W/fx/android.webm" hhhhhhhh-0010 audio/webm) == 200 ]] && waitfor hhhhhhhh-0010 done'
+check "a connection cut half way: nothing saved, no leftover, no traceback, the server keeps serving, a retry works" '[[ -z $(ls -A "$A/phone" | grep -vE "\.json$|^[0-9]{4}-") && ! -e $A/phone/hhhhhhhh-0010.json && $(ls "$A/audio" | wc -l) == 3 ]] && ! grep -q Traceback "$W/srv.err" && [[ $(post "$W/fx/android.webm" hhhhhhhh-0010 audio/webm) == 200 ]] && waitfor hhhhhhhh-0010 done'
 stop
 
 # ---- the daily file has two writers: a phone block landing inside a laptop session (live) loses nothing
@@ -125,6 +126,43 @@ assert len(live) == 1 and live[0].status == "copied", [(p.mode, p.status) for p 
 assert live[0].text.split() == [x for k in range(300) for x in ("live", str(k))], "live lines lost"
 assert len(ph) == 120 and all(p.status == "ok" and p.text.count("word") == 300 for p in ph), len(ph)
 PY'
+
+# ---- every note as its own text file: <archive>/phone/<day>/HH-MM-SS[-title-slug].txt
+stop; fresh; start ""
+post "$W/fx/android.webm" iiiiiiii-0011 audio/webm "Shopping list!" 7 >/dev/null; post "$W/fx/iphone.mp4" iiiiiiii-0012 audio/mp4 "" >/dev/null
+waitfor iiiiiiii-0011 done; waitfor iiiiiiii-0012 done
+PD=$A/phone/$DAY
+check "text file with a title: HH-MM-SS-title-slug.txt; first line date time · title · duration · audio path, blank line, the text" 'F=$(ls "$PD"/*-shopping-list.txt) && [[ $(basename "$F") =~ ^[0-9]{2}-[0-9]{2}-[0-9]{2}-shopping-list\.txt$ ]] && [[ $(sed -n 1p "$F") =~ ^$DAY\ [0-9:]{8}\ ·\ Shopping\ list!\ ·\ 2s\ ·\ $A/audio/[0-9-]{17}-phone\.webm$ ]] && [[ -z $(sed -n 2p "$F") && $(sed -n 3p "$F") == "Phone note text." ]]'
+check "text file without a title: HH-MM-SS.txt, no title field" 'F=$(ls "$PD" | grep -E "^[0-9]{2}-[0-9]{2}-[0-9]{2}\.txt$") && [[ $(sed -n 1p "$PD/$F") =~ ^$DAY\ [0-9:]{8}\ ·\ 2s\ ·\ $A/audio/[0-9-]{17}-phone\.m4a$ ]] && [[ $(sed -n 3p "$PD/$F") == "Phone note text." ]]'
+check "atomic: no temp file left; the daily file has its two blocks as before" '[[ -z $(ls -A "$PD" | grep -v "\.txt$") && $(ls "$PD" | wc -l) == 2 && $(grep -c "^start:" "$DAILY") == 2 ]]'
+check "atomic: an existing name is never overwritten, no temp left (write_note_file)" '"$PY" - "$A" <<"PY"
+import sys
+from pathlib import Path
+from stenographr.phone import write_note_file, note_file
+a = Path(sys.argv[1]); n = {"start": "2026-02-03T04:05:06", "title": "", "seconds": 3, "audio": "audio/x.webm", "text": "one"}
+assert write_note_file(a, n) is True
+n["text"] = "two"
+assert write_note_file(a, n) is False
+f = note_file(a, n)
+assert f.read_text().endswith("\n\none\n"), f.read_text()
+assert [p.name for p in f.parent.iterdir()] == ["04-05-06.txt"]
+PY'
+stop; fresh; FAKE_ENGINE_FAIL=1 start ""
+post "$W/fx/android.webm" jjjjjjjj-0013 audio/webm "Nope" >/dev/null
+check "failed transcription writes no text file (the failed mark stays)" 'waitfor jjjjjjjj-0013 failed && [[ ! -e $A/phone/$DAY || -z $(ls -A "$A/phone/$DAY") ]]'
+stop; fresh; start ""
+for i in 14 15 16; do post "$W/fx/android.webm" "kkkkkkkk-00$i" audio/webm "t$i" >/dev/null; done
+waitfor kkkkkkkk-0016 done; stop
+F14=$(ls "$PD"/*-t14.txt); F15=$(ls "$PD"/*-t15.txt); F16=$(ls "$PD"/*-t16.txt)
+rm "$F15"; rm "$F16"; echo "edited by hand" > "$F14"
+printf '{"id": "oooooooo-0001", "start": "2026-03-01T09:08:07", "title": "Old one", "seconds": 4.0, "audio": "audio/2026-03-01-090807-phone.webm", "status": "done", "text": "Earlier text.", "error": ""}' > "$A/phone/oooooooo-0001.json"
+steno phone --backfill > "$W/bf.out" 2>&1
+check "backfill: the missing files (today and an earlier day) are made, the existing one is untouched, the count is printed" '[[ -f $F15 && -f $F16 && $(cat "$F14") == "edited by hand" && -f $A/phone/2026-03-01/09-08-07-old-one.txt && $(sed -n 3p "$A/phone/2026-03-01/09-08-07-old-one.txt") == "Earlier text." ]] && grep -q "3 text file" "$W/bf.out"'
+steno phone --backfill > "$W/bf.out" 2>&1
+check "backfill: a second run writes nothing" 'grep -q "0 text file" "$W/bf.out"'
+rm "$F15"; start ""
+check "server start also backfills" '[[ -f $F15 ]]'
+stop
 
 # ---- phone --install / --remove / --tailscale
 export XDG_CONFIG_HOME=$W/xdg FAKE_SYSTEMCTL_LOG=$W/sysctl.log FAKE_TS_LOG=$W/ts.log; : > "$W/sysctl.log"; : > "$W/ts.log"

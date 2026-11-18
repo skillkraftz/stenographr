@@ -46,6 +46,36 @@ def clean_title(raw: str) -> str:
     return t or "unknown"
 
 
+def note_file(archive: Path, n: dict) -> Path:
+    """<archive>/phone/YYYY-MM-DD/HH-MM-SS[-title-slug].txt: the same name every time for the same note."""
+    start = dt.datetime.fromisoformat(n["start"])
+    title = clean_title(n["title"])
+    slug = "" if title == "unknown" else re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40].strip("-")
+    return archive / "phone" / f"{start:%Y-%m-%d}" / (f"{start:%H-%M-%S}-{slug}.txt" if slug else f"{start:%H-%M-%S}.txt")
+
+
+def note_text(archive: Path, n: dict) -> str:
+    start = dt.datetime.fromisoformat(n["start"])
+    title = clean_title(n["title"])
+    head = [f"{start:%Y-%m-%d %H:%M:%S}"] + ([] if title == "unknown" else [title]) + [daily.fmt_dur(n["seconds"]), str(archive / n["audio"])]
+    return " · ".join(head) + "\n\n" + n["text"].strip() + "\n"
+
+
+def write_note_file(archive: Path, n: dict) -> bool:
+    """Write the note's text file atomically (temp file, then a hard link that fails if the name exists). False if it already existed."""
+    dest = note_file(archive, n)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.parent / f".{dest.name}.tmp"
+    tmp.write_text(note_text(archive, n), encoding="utf-8")
+    try:
+        os.link(tmp, dest)
+        return True
+    except FileExistsError:
+        return False
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 class Store:
     """Notes on disk (<archive>/phone/<id>.json) and the queue for the worker."""
 
@@ -106,6 +136,26 @@ class Store:
         self.q.put(nid)
         return n
 
+    def write_file(self, nid: str) -> None:
+        try:
+            write_note_file(self.cfg.archive, self.notes[nid])
+        except OSError as e:
+            self.log.error(nid, f"could not write the note's text file: {type(e).__name__}: {e}")
+
+    def backfill(self) -> int:
+        """A text file for every done note that has none. Never overwrites. Returns how many were written."""
+        made = 0
+        for n in sorted(self.notes.values(), key=lambda n: n["start"]):
+            if n["status"] != "done":
+                continue
+            try:
+                made += write_note_file(self.cfg.archive, n)
+            except (OSError, ValueError) as e:
+                self.log.error(n["id"], f"backfill: could not write the text file: {type(e).__name__}: {e}")
+        if made:
+            self.log.info(NAME, f"backfill: {made} text file(s) written")
+        return made
+
     def today(self) -> list[dict]:
         day = f"{dt.date.today():%Y-%m-%d}"
         with self.lock:
@@ -155,6 +205,8 @@ class Store:
                 failed = p.status.startswith("FAILED")
                 self.update(n["id"], status="failed" if failed else "done", text="" if failed else p.text,
                             error="transcription failed" if failed else "")
+                if not failed:
+                    self.write_file(n["id"])
                 self.log.info(n["id"], "already in the daily file: not written again")
                 return True
         return False
@@ -173,6 +225,7 @@ class Store:
         status = daily.ok(no_speech=not lines)
         self._append(start, daily.block_text(start, NAME, clean_title(n["title"]), n["audio"], lines, seconds, status), nid)
         self.update(nid, status="done", text=" ".join(t for _, t in lines), seconds=seconds)
+        self.write_file(nid)
         self.log.info(nid, f"finish: {len(lines)} lines, {status}")
 
 
@@ -269,11 +322,19 @@ def make_handler(store: Store, max_bytes: int, version: str):
 def make_server(cfg, log: Log, requested: str, port: int | None = None, version: str = "unknown"):
     """(server, store); the worker thread is started here. The caller runs server.serve_forever()."""
     store = Store(cfg, log, requested)
+    store.backfill()
     threading.Thread(target=store.work, daemon=True).start()
     srv = ThreadingHTTPServer((HOST, cfg.phone_port if port is None else port),
                               make_handler(store, cfg.phone_max_mb * 1024 * 1024, version))
     srv.daemon_threads = True
     return srv, store
+
+
+def backfill(cfg, log: Log) -> int:
+    """`phone --backfill`: write the missing text files and exit."""
+    made = Store(cfg, log, "cpu").backfill()
+    print(f"phone: {made} text file(s) written in {cfg.archive / 'phone'}")
+    return 0
 
 
 def run(cfg, log: Log, requested: str, port: int | None, version: str) -> int:
