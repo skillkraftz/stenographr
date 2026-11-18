@@ -21,12 +21,12 @@ from .record import REC_RATE
 BITRATE = "96k"
 
 
-def pick_path(archive: Path, start: dt.datetime, mode: str) -> Path:
-    """<archive>/audio/YYYY-MM-DD-HHMMSS-<mode>.opus (session start); never an existing name."""
+def pick_path(archive: Path, start: dt.datetime, mode: str, ext: str = "opus") -> Path:
+    """<archive>/audio/YYYY-MM-DD-HHMMSS-<mode>.<ext> (session start); never an existing name."""
     d = archive / "audio"
     n = 1
     while True:
-        p = d / (f"{start:%Y-%m-%d-%H%M%S}-{mode}.opus" if n == 1 else f"{start:%Y-%m-%d-%H%M%S}-{mode}-{n}.opus")
+        p = d / (f"{start:%Y-%m-%d-%H%M%S}-{mode}.{ext}" if n == 1 else f"{start:%Y-%m-%d-%H%M%S}-{mode}-{n}.{ext}")
         if not p.exists():
             return p
         n += 1

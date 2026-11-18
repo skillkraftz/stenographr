@@ -1,0 +1,3 @@
+#!/bin/sh
+# Fake systemctl: logs its arguments to $FAKE_SYSTEMCTL_LOG.
+echo "$*" >> "${FAKE_SYSTEMCTL_LOG:-/dev/null}"

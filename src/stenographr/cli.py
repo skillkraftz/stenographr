@@ -153,6 +153,21 @@ def cmd_recall(args) -> int:
     return recallmod.recall(cfg.archive, args.n)
 
 
+def cmd_phone(args) -> int:
+    from . import phone, phone_ctl
+    cfg, log = _cfg_log(args)
+    port = args.port or cfg.phone_port
+    if args.install:
+        return phone_ctl.install(args.config)
+    if args.remove:
+        return phone_ctl.remove()
+    if args.tailscale:
+        return phone_ctl.tailscale(args.tailscale, port)
+    if not _archive_ok(cfg):
+        return 1
+    return phone.run(cfg, log, args.device or _dictation_device(cfg), args.port, _version())
+
+
 def cmd_update(args) -> int:
     from . import update
     return update.update()
@@ -214,6 +229,14 @@ def main(argv: list[str] | None = None) -> int:
     k = sub.add_parser("keybinding", help="install/remove the Ctrl+` GNOME shortcut for live --toggle")
     k.add_argument("action", choices=["install", "remove"])
     k.set_defaults(fn=cmd_keybinding)
+    ph = sub.add_parser("phone", help="web page for dictating on a phone: the note and its audio land here (foreground; 127.0.0.1 only)")
+    ph.add_argument("--port", type=int, help="default: config [phone] port (3111); 0 = any free port")
+    ph.add_argument("--install", action="store_true", help="install and start a systemd user service for `phone`")
+    ph.add_argument("--remove", action="store_true", help="stop and remove that service")
+    ph.add_argument("--tailscale", nargs="?", const="on", choices=["on", "off"],
+                    help="`tailscale serve` the page on the tailnet (HTTPS, never Funnel); `off` undoes it")
+    ph.add_argument("--device", choices=["cpu", "gpu", "auto"], help="default: cpu (config [device] device overrides)")
+    ph.set_defaults(fn=cmd_phone)
     u = sub.add_parser("update", help="git pull --ff-only the source checkout (clean main only); reinstall if pyproject changed")
     u.set_defaults(fn=cmd_update)
     args = ap.parse_args(argv)

@@ -26,8 +26,10 @@ Obsidian).
   audio/                              the audio of every dictation session
     2026-11-09-112850-notes.opus      <session start>-<mode>.opus, mono 48 kHz Opus 96 kbps
     2026-11-10-200600-live.opus
+    2026-11-18-101530-phone.webm      a phone note, as the phone sent it (.webm Android, .m4a iPhone)
+  phone/                              `phone` only: one <note id>.json per note (status, text), see section 7
 ```
-- Files sit loose in the folder. The only subfolders are `clips/`, `other/` and `audio/`, all flat.
+- Files sit loose in the folder. The only subfolders are `clips/`, `other/`, `audio/` and (only if `phone` is used) `phone/`, all flat.
 - Audio files are never deleted or overwritten by stenographr (a name collision gets `-2`).
 - One transcript per source file: if either its `<stem>.txt` next to the video or its archive copy
   already exists, `clip` refuses that video, prints the `rm` command to redo it and exits 1. Nothing
@@ -318,6 +320,28 @@ daily file: today's, or if that has no pieces, the most recent daily file that d
   `uv tool install --editable ".[gpu]" --force` from the checkout. Ends with `updated to <commit>` or `up to date at <hash>`.
 - Then lists the running live instances from the registry (pid, kind popup/loop, where: popup, tmux pane or terminal);
   after a pull it says to restart them. It never stops or kills anything.
+
+## 7. `stenographr phone`
+Built: dictate on the phone, the note and its audio land here. A web server inside stenographr (stdlib `http.server`, no new dependency); the rest of stenographr stays service-free.
+- **Server:** `stenographr phone` (foreground) listens on `127.0.0.1:<port>`, port from `--port` or `[phone] port` (3111; 0 = any free port), never on another address.
+  Paths: `GET /` (the page), `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`, `/version`, `GET /api/notes` (today's phone notes),
+  `POST /api/notes`; anything else is 404, other methods 405. No auth: the tailnet is the only way in.
+- **Upload:** the raw recording in the body, `Content-Type` = its type; headers `X-Note-Id` (client-made id, `[A-Za-z0-9-]{8,64}`), `X-Duration` (seconds), `X-Title` (URL-encoded, optional).
+  Over `[phone] max_mb` (200) -> 413 and nothing is read or saved; no/empty body, a bad id -> 400. The audio is saved as sent to `audio/YYYY-MM-DD-HHMMSS-phone.<ext>` (start = now minus
+  `X-Duration`; `.webm`, `.m4a`, ...; a collision gets `-2`; never overwritten), then the answer 200 `{id, status}`. The same id again (a retry) changes nothing.
+- **Queue:** one background worker, in upload order. A note's state is `<archive>/phone/<id>.json` (`queued` / `working` / `done` / `failed`, title, text); on start, notes left
+  `queued`/`working` are queued again. The worker converts with ffmpeg (`clip.extract_audio`), transcribes with the configured engine, on the CPU like `notes` (`--device` / `[device] device` override),
+  with the clean pass (`transcribe_long`: whole sentences). The model is loaded when a burst of notes starts and dropped when the queue is empty (CPU load ~1.2 s, against ~5 GB of RAM kept otherwise).
+- **Daily file:** per finished note ONE block, written with a single append (so a laptop session's lines never land inside it):
+  `start: <upload time - duration> · phone · <title or unknown> · audio/<file>`, `[HH:MM:SS] <sentence>` lines, `end: ... · <audio length> · ok` (or `ok (no speech)`).
+  A failure (ffmpeg or engine) keeps the audio, logs the reason in `steno.log`, writes the block with `end: ... · FAILED: transcription failed, see steno.log` and marks the note `failed` on the page.
+  `recall` shows phone notes like other sessions.
+- **Page:** one screen, phone first: a Record/Stop button (MediaRecorder: webm/opus, or mp4/aac on iPhone), a timer, an optional title field, today's phone notes with their text.
+  A recording stays in the page (and in IndexedDB, surviving a reload) and is re-sent with growing delays until the server says it is saved. Manifest + icons: "Add to Home Screen".
+- **Setup:** `phone --tailscale [on|off]` runs `tailscale serve --bg --https=443 http://127.0.0.1:<port>` / `tailscale serve --https=443 off` and prints the phone URL; if tailscale refuses
+  for lack of operator rights it prints `sudo tailscale set --operator=$USER` and exits 1. `phone --install` / `--remove`: a systemd user service `stenographr-phone.service` (opt-in).
+- Not built: authentication, a retry button for failed notes, notes older than today in the page (they are in the daily file).
+- Decision: `docs/decisions/2026-11-18-phone-notes.md`.
 
 ## Other decisions
 Design decisions are one file each in `docs/decisions/` (index: `docs/DECISIONS.md`).
