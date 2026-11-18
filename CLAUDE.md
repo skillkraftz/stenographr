@@ -21,7 +21,7 @@ downloaded once, by hand). Read the SPEC.md section for what you change, and upd
 | `src/stenographr/live_state.py` | The live screen's state in one place: `Phase` enum, `TRANSITIONS` (an illegal move raises with STENO_STRICT=1, else is logged and ignored), live lines + partial |
 | `src/stenographr/live_flow.py` | `LiveFlow`: the only thing that moves the state (start, record -> clean -> review, deliver); no Textual |
 | `src/stenographr/live_ui.py` | The Textual screen (view only): draws what the flow says, passes keys and buttons to it |
-| `src/stenographr/daily.py`, `recall.py` | Session blocks in the daily/notes files (writer + parser); `recall` (read-only) |
+| `src/stenographr/daily.py`, `recall.py` | Session blocks in the daily/notes files (writer, `block_text` for whole blocks, parser); `recall` (read-only) |
 | `src/stenographr/record.py`, `audio.py` | `pw-record` command and mic checks; session Opus audio |
 | `src/stenographr/phone.py`, `phone_page.py`, `phone_ctl.py` | `phone`: web server on 127.0.0.1 (upload -> `audio/` -> worker queue -> daily block), the one-screen page + manifest + icons, `--install`/`--remove` (systemd user service) and `--tailscale` |
 | `src/stenographr/tmuxsend.py`, `clipboard.py`, `registry.py` | Send into the Claude pane; `wl-copy`; the one-recorder-at-a-time registry |
@@ -52,8 +52,8 @@ New checks must fail on the code they guard.
 - Timestamps `[HH:MM:SS]` go only in the daily/notes files, never in terminal output, typed text, clipboard or recall output.
 - Session audio in `<archive>/audio/` is never deleted or overwritten; an audio failure never stops a session.
 - Record only from the configured mic node; only one instance records at a time. `live` never types into other windows except a Claude pane via `tmux send-keys -l`; **Claude send** is the ONLY place Enter is pressed.
-- Load the engine once per device per run (`Engines`), once per session for `notes`. Don't hardcode Parakeet outside its engine module.
-- `notes` and `live` default to the CPU; `clip` stays auto. GPU: if enabling it needs sudo, a system CUDA install or >~2 GB of downloads, stop and report.
+- Load the engine once per device per run (`Engines`), once per session for `notes`; `phone` loads it per burst of notes and drops it when the queue is empty. Don't hardcode Parakeet outside its engine module.
+- `notes`, `live` and `phone` default to the CPU; `clip` stays auto. GPU: if enabling it needs sudo, a system CUDA install or >~2 GB of downloads, stop and report.
 - Read-only on `/data` except benchmark outputs (`/tmp/stenographr-bench`). Don't modify phone-dock unless the task says so.
 - Keep the repo publishable: no media, transcripts, logs, models, or personal paths/emails in files.
 - Design decisions: `docs/decisions/YYYY-MM-DD-slug.md` (format in RULES.md). SPEC.md stays the behaviour spec.

@@ -327,19 +327,19 @@ Built: dictate on the phone, the note and its audio land here. A web server insi
   Paths: `GET /` (the page), `/manifest.webmanifest`, `/icon-192.png`, `/icon-512.png`, `/apple-touch-icon.png`, `/version`, `GET /api/notes` (today's phone notes),
   `POST /api/notes`; anything else is 404, other methods 405. No auth: the tailnet is the only way in.
 - **Upload:** the raw recording in the body, `Content-Type` = its type; headers `X-Note-Id` (client-made id, `[A-Za-z0-9-]{8,64}`), `X-Duration` (seconds), `X-Title` (URL-encoded, optional).
-  Over `[phone] max_mb` (200) -> 413 and nothing is read or saved; no/empty body, a bad id -> 400. The audio is saved as sent to `audio/YYYY-MM-DD-HHMMSS-phone.<ext>` (start = now minus
+  Over `[phone] max_mb` (200) -> 413 and nothing is read or saved; no/empty body, a bad id -> 400; a connection that breaks before the whole body arrived -> 408 and nothing is kept (the page retries; it treats 400/413 as final). The audio is saved as sent to `audio/YYYY-MM-DD-HHMMSS-phone.<ext>` (start = now minus
   `X-Duration`; `.webm`, `.m4a`, ...; a collision gets `-2`; never overwritten), then the answer 200 `{id, status}`. The same id again (a retry) changes nothing.
 - **Queue:** one background worker, in upload order. A note's state is `<archive>/phone/<id>.json` (`queued` / `working` / `done` / `failed`, title, text); on start, notes left
-  `queued`/`working` are queued again. The worker converts with ffmpeg (`clip.extract_audio`), transcribes with the configured engine, on the CPU like `notes` (`--device` / `[device] device` override),
+  `queued`/`working` are queued again (one whose block is already in the daily file, because the server stopped just after writing it, is marked done and not written twice). The worker converts with ffmpeg (`clip.extract_audio`), transcribes with the configured engine, on the CPU like `notes` (`--device` / `[device] device` override),
   with the clean pass (`transcribe_long`: whole sentences). The model is loaded when a burst of notes starts and dropped when the queue is empty (CPU load ~1.2 s, against ~5 GB of RAM kept otherwise).
 - **Daily file:** per finished note ONE block, written with a single append (so a laptop session's lines never land inside it):
   `start: <upload time - duration> · phone · <title or unknown> · audio/<file>`, `[HH:MM:SS] <sentence>` lines, `end: ... · <audio length> · ok` (or `ok (no speech)`).
   A failure (ffmpeg or engine) keeps the audio, logs the reason in `steno.log`, writes the block with `end: ... · FAILED: transcription failed, see steno.log` and marks the note `failed` on the page.
-  `recall` shows phone notes like other sessions.
+  `recall` shows phone notes like other sessions. A phone block can land inside a laptop session that is still open (two writers, one file): the parser reads it as its own session and the open one continues after it.
 - **Page:** one screen, phone first: a Record/Stop button (MediaRecorder: webm/opus, or mp4/aac on iPhone), a timer, an optional title field, today's phone notes with their text.
-  A recording stays in the page (and in IndexedDB, surviving a reload) and is re-sent with growing delays until the server says it is saved. Manifest + icons: "Add to Home Screen".
+  A recording stays in the page (and in IndexedDB, surviving a reload) and is re-sent with growing delays until the server says it is saved; an upload that hangs is given up after 1 min + 30 s per MB, and a retry is made at once when the page comes back to the foreground or the network returns. Manifest + icons: "Add to Home Screen".
 - **Setup:** `phone --tailscale [on|off]` runs `tailscale serve --bg --https=443 http://127.0.0.1:<port>` / `tailscale serve --https=443 off` and prints the phone URL; if tailscale refuses
-  for lack of operator rights it prints `sudo tailscale set --operator=$USER` and exits 1. `phone --install` / `--remove`: a systemd user service `stenographr-phone.service` (opt-in).
+  for lack of operator rights it prints `sudo tailscale set --operator=$USER` and exits 1. `phone --install` / `--remove`: a systemd user service `stenographr-phone.service` (opt-in; `Restart=on-failure`, 10 s apart, so a /data that is not mounted yet is retried).
 - Not built: authentication, a retry button for failed notes, notes older than today in the page (they are in the daily file).
 - Decision: `docs/decisions/2026-11-18-phone-notes.md`.
 

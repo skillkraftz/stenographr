@@ -129,8 +129,10 @@ function pickType(){
 async function start(){
   if (!navigator.mediaDevices || !window.MediaRecorder){ say('This browser cannot record. Open the page over https.', true); return; }
   let stream;
+  btn.disabled = true;                                  // a second tap during the permission prompt must not start a second recorder
   try { stream = await navigator.mediaDevices.getUserMedia({audio: true}); }
   catch (e) { say('No microphone: allow it for this page and try again.', true); return; }
+  finally { btn.disabled = false; }
   const type = pickType();
   rec = new MediaRecorder(stream, type ? {mimeType: type} : undefined);
   chunks = [];
@@ -162,9 +164,11 @@ btn.onclick = () => rec ? stop() : start();
 // ---- upload: retried until the server answers "saved"
 async function upload(n, delay){
   if (n.busy) return;
-  n.busy = true; n.state = 'uploading'; render();
+  clearTimeout(n.timer); n.busy = true; n.state = 'uploading'; render();
+  const ctl = new AbortController();                    // a dead mobile connection can hang a fetch for minutes: give up and retry
+  const guard = setTimeout(() => ctl.abort(), 60000 + (n.blob.size / 1048576) * 30000);
   try {
-    const r = await fetch('/api/notes', {method: 'POST', body: n.blob, headers: {
+    const r = await fetch('/api/notes', {method: 'POST', body: n.blob, signal: ctl.signal, headers: {
       'Content-Type': n.type || 'application/octet-stream', 'X-Note-Id': n.id,
       'X-Title': encodeURIComponent(n.title), 'X-Duration': String(n.seconds)}});
     if (r.ok){
@@ -178,8 +182,8 @@ async function upload(n, delay){
   } catch (e) {
     n.busy = false; n.state = 'retrying'; render();
     const d = Math.min((delay || 2000) * 2, 30000);
-    setTimeout(() => upload(n, d), d);
-  }
+    n.timer = setTimeout(() => upload(n, d), d);
+  } finally { clearTimeout(guard); }
 }
 
 // ---- the list
@@ -208,7 +212,12 @@ async function poll(){
   polling = setTimeout(poll, busy ? 2500 : 15000);
 }
 window.addEventListener('beforeunload', e => { if (rec) { e.preventDefault(); e.returnValue = ''; } });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+document.addEventListener('visibilitychange', () => {   // a phone throttles timers in the background: retry as soon as the page is back
+  if (document.hidden) return;
+  for (const n of pending.values()) if (n.state === 'retrying') upload(n);
+  poll();
+});
+window.addEventListener('online', () => { for (const n of pending.values()) if (n.state === 'retrying') upload(n); });
 render();
 (async () => {
   const saved = await idb('readonly', s => s.getAll());

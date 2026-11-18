@@ -106,6 +106,7 @@ require for the microphone. Tailnet only, never Funnel.
 The upload returns at once; the text appears in the page's list when the transcription is done (CPU, same engine as `notes`). The page keeps
 the recording, retrying, until the server has saved it, even across a page reload. The original recording is kept as sent
 (`audio/<start>-phone.webm` from Android, `.m4a` from iPhone). If the transcription fails the audio stays and the daily block says `FAILED`.
+To have the service start without you being logged in, run `loginctl enable-linger $USER` once.
 
 ## update
 

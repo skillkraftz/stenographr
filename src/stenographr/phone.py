@@ -9,7 +9,8 @@ MediaRecorder and POSTs the raw recording to /api/notes. The server:
      engine and settings as laptop dictation (the clean pass, whole sentences) and appends one session block
      (`start: ... · phone · <title or unknown> · audio/<file>`) to <archive>/steno-YYYY-MM-DD.txt in ONE write.
   3. keeps each note's state in <archive>/phone/<id>.json (queued / working / done / failed), so a restart
-     picks up what was still queued and the page can show the text.
+     picks up what was still queued (a note whose block is already in the daily file is not written twice) and the
+     page can show the text.
 
 The model is loaded when a burst of notes starts and dropped when the queue is empty (see worker): on the CPU it takes
 ~1.2 s, and it would otherwise keep ~5 GB of RAM while the laptop is used for dictation.
@@ -43,17 +44,6 @@ def clean_title(raw: str) -> str:
     """The `where` field of the start line: one line, no ' · ' (that is the field separator)."""
     t = " ".join(raw.replace("·", "-").split())[:80]
     return t or "unknown"
-
-
-def block_text(start: dt.datetime, title: str, audio_ptr: str, lines: list[tuple[dt.datetime, str]],
-               seconds: float, status: str) -> str:
-    """One whole session block (written with a single append, so a laptop session's lines can't land inside it)."""
-    sep = daily._SEP
-    out = [f"start: {daily.stamp(start)}{sep}phone{sep}{title}{sep}{audio_ptr}\n"]
-    out += [f"[{when:%H:%M:%S}] {' '.join(text.split())}\n" for when, text in lines]
-    end = start + dt.timedelta(seconds=seconds)
-    out.append(f"end: {daily.stamp(end)}{sep}{daily.fmt_dur(seconds)}{sep}{status}\n")
-    return "".join(out)
 
 
 class Store:
@@ -144,7 +134,7 @@ class Store:
     def _fail(self, nid: str, why: str) -> None:
         n = self.notes[nid]
         start = dt.datetime.fromisoformat(n["start"])
-        self._append(start, block_text(start, clean_title(n["title"]), n["audio"], [], n["seconds"], daily.failed(why)), nid)
+        self._append(start, daily.block_text(start, NAME, clean_title(n["title"]), n["audio"], [], n["seconds"], daily.failed(why)), nid)
         self.update(nid, status="failed", error=why)
 
     def _append(self, start: dt.datetime, text: str, nid: str) -> None:
@@ -153,17 +143,35 @@ class Store:
         except OSError as e:
             self.log.error(nid, f"could not write the daily file: {type(e).__name__}: {e}")
 
+    def _already_written(self, start: dt.datetime, n: dict) -> bool:
+        """The server stopped after the block was appended but before the state was saved: take the block's result
+        as the note's, do not write it again."""
+        try:
+            text = daily.daily_path(self.cfg.archive, start).read_text(encoding="utf-8")
+        except OSError:
+            return False
+        for p in daily.parse_sessions(text):
+            if p.mode == NAME and p.audio == n["audio"] and p.status is not None:
+                failed = p.status.startswith("FAILED")
+                self.update(n["id"], status="failed" if failed else "done", text="" if failed else p.text,
+                            error="transcription failed" if failed else "")
+                self.log.info(n["id"], "already in the daily file: not written again")
+                return True
+        return False
+
     def _transcribe(self, nid: str, engines: Engines) -> None:
         n = self.notes[nid]
         self.update(nid, status="working")
         start = dt.datetime.fromisoformat(n["start"])
+        if self._already_written(start, n):
+            return
         audio = clipmod.extract_audio(self.cfg.archive / n["audio"])
         engines.decide(self.requested, NAME)
         segs, _ = transcribe_audio(self.cfg, self.log, engines, nid, audio, self.requested, method="transcribe_long")
         lines = [(start + dt.timedelta(seconds=s["start"]), s["text"].strip()) for s in segs if s["text"].strip()]
         seconds = len(audio) / clipmod.SR
         status = daily.ok(no_speech=not lines)
-        self._append(start, block_text(start, clean_title(n["title"]), n["audio"], lines, seconds, status), nid)
+        self._append(start, daily.block_text(start, NAME, clean_title(n["title"]), n["audio"], lines, seconds, status), nid)
         self.update(nid, status="done", text=" ".join(t for _, t in lines), seconds=seconds)
         self.log.info(nid, f"finish: {len(lines)} lines, {status}")
 
@@ -177,15 +185,19 @@ def make_handler(store: Store, max_bytes: int, version: str):
             pass
 
         def _send(self, code: int, body: bytes, ctype: str, close: bool = False) -> None:
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
+            try:
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                if close:
+                    self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(body)
+            except OSError:                              # the phone went away (flaky connection): nobody to answer
+                close = True
             if close:
-                self.send_header("Connection", "close")
                 self.close_connection = True
-            self.end_headers()
-            self.wfile.write(body)
 
         def _json(self, code: int, obj, close: bool = False) -> None:
             self._send(code, json.dumps(obj).encode(), "application/json", close)
@@ -240,7 +252,7 @@ def make_handler(store: Store, max_bytes: int, version: str):
                     os.fsync(f.fileno())
                 if got != size:                          # the connection broke: the page retries the whole thing
                     tmp.unlink(missing_ok=True)
-                    return self._json(400, {"error": "incomplete upload"}, close=True)
+                    return self._json(408, {"error": "incomplete upload"}, close=True)    # not 400: the page retries it
                 n = store.add(nid, tmp, ctype, title, seconds)
             except OSError as e:
                 store.log.error(nid, f"upload not saved: {type(e).__name__}: {e}")

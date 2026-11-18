@@ -81,11 +81,57 @@ start ""
 check "restart: a note left queued/working is transcribed" 'waitfor ffffffff-0005 done && grep -q "^start: $DAY 10:10:10 · phone · Left over · audio/$DAY-101010-phone.webm$" "$DAILY"'
 stop
 
+# ---- a restart after the block was appended but before the state was saved: written once
+fresh; mkdir -p "$A/audio" "$A/phone"; cp "$W/fx/android.webm" "$A/audio/$DAY-111111-phone.webm"
+printf '{"id": "ffffffff-0006", "start": "%sT11:11:11", "title": "Twice", "seconds": 2.0, "audio": "audio/%s-111111-phone.webm", "status": "working", "text": "", "error": ""}' "$DAY" "$DAY" > "$A/phone/ffffffff-0006.json"
+printf 'start: %s 11:11:11 · phone · Twice · audio/%s-111111-phone.webm\n[11:11:11] Already there.\nend: %s 11:11:13 · 2s · ok\n' "$DAY" "$DAY" "$DAY" > "$DAILY"
+start ""
+check "restart: a note whose block is already in the daily file is marked done, not written again" 'waitfor ffffffff-0006 done && [[ $(grep -c "^start:" "$DAILY") == 1 && $(field ffffffff-0006 text) == "Already there." ]]'
+stop
+
+# ---- the real-world upload: content types with parameters, an unknown one, a connection that breaks half way
+fresh; start ""
+check "content type with codecs parameter (iPhone, Android) and an unknown one: audio kept, transcribed" '[[ $(post "$W/fx/iphone.mp4" gggggggg-0007 "audio/mp4;codecs=mp4a.40.2") == 200 && $(post "$W/fx/android.webm" gggggggg-0008 "audio/webm;codecs=opus") == 200 && $(post "$W/fx/android.webm" gggggggg-0009 application/octet-stream) == 200 ]] && waitfor gggggggg-0009 done && ls "$A/audio" | grep -qE "\.m4a$" && ls "$A/audio" | grep -qE "\.webm$" && ls "$A/audio" | grep -qE "\.audio$" && [[ $(grep -c "^start:" "$DAILY") == 3 ]]'
+cat > "$W/cut.py" <<'PY'
+import socket, sys
+s = socket.create_connection(("127.0.0.1", int(sys.argv[1])))
+s.sendall(b"POST /api/notes HTTP/1.1\r\nHost: x\r\nX-Note-Id: hhhhhhhh-0010\r\nContent-Type: audio/webm\r\nContent-Length: 5000\r\n\r\n" + b"x" * 700)
+s.close()
+PY
+"$PY" "$W/cut.py" "$PORT"; sleep 0.5
+check "a connection cut half way: nothing saved, no leftover, no traceback, the server keeps serving, a retry works" '[[ -z $(ls -A "$A/phone" | grep -v "\.json$") && ! -e $A/phone/hhhhhhhh-0010.json && $(ls "$A/audio" | wc -l) == 3 ]] && ! grep -q Traceback "$W/srv.err" && [[ $(post "$W/fx/android.webm" hhhhhhhh-0010 audio/webm) == 200 ]] && waitfor hhhhhhhh-0010 done'
+stop
+
+# ---- the daily file has two writers: a phone block landing inside a laptop session (live) loses nothing
+check "phone blocks in the middle of a live session: every line whole, the live session read to its end" '"$PY" - "$W" <<"PY"
+import sys, datetime as dt, threading
+from pathlib import Path
+from stenographr import daily
+from stenographr.log import Log
+w = Path(sys.argv[1]); f = w / "two-writers.txt"; f.unlink(missing_ok=True)
+now = dt.datetime(2026, 1, 1, 10, 0, 0)
+sess = daily.Session(Log(w / "x.log"), "live", [(f, None)], now, "live", "unknown", "audio/a-live.opus")
+def phone(i):
+    for k in range(40):
+        daily.append_line(f, daily.block_text(now, "phone", f"p{i}", f"audio/p{i}-{k}.webm", [(now, f"phone {i} {k} " + "word " * 300)], 2, "ok"))
+ts = [threading.Thread(target=phone, args=(i,)) for i in range(3)]
+[t.start() for t in ts]
+for k in range(300): sess.line(f"live {k}", now)
+[t.join() for t in ts]
+sess.end(now + dt.timedelta(seconds=9), "copied")
+ps = daily.parse_sessions(f.read_text())
+live = [p for p in ps if p.mode == "live"]; ph = [p for p in ps if p.mode == "phone"]
+assert len(live) == 1 and live[0].status == "copied", [(p.mode, p.status) for p in ps][:5]
+assert live[0].text.split() == [x for k in range(300) for x in ("live", str(k))], "live lines lost"
+assert len(ph) == 120 and all(p.status == "ok" and p.text.count("word") == 300 for p in ph), len(ph)
+PY'
+
 # ---- phone --install / --remove / --tailscale
 export XDG_CONFIG_HOME=$W/xdg FAKE_SYSTEMCTL_LOG=$W/sysctl.log FAKE_TS_LOG=$W/ts.log; : > "$W/sysctl.log"; : > "$W/ts.log"
 steno phone --install > "$W/inst.out" 2>&1; echo $? > "$W/rc"
 U=$XDG_CONFIG_HOME/systemd/user/stenographr-phone.service
 check "--install: unit written (runs 'stenographr ... phone'), enabled and started" '[[ $(cat "$W/rc") == 0 ]] && grep -qE "^ExecStart=.*stenographr phone$" "$U" && grep -q "enable --now stenographr-phone.service" "$W/sysctl.log"'
+check "--install: restarts only after 10 s (a /data that is not mounted yet must not exhaust the start limit)" 'grep -qx "RestartSec=10" "$U"'
 steno phone --remove > "$W/rem.out" 2>&1
 check "--remove: service disabled, unit file gone; remove again says not installed" '[[ ! -e $U ]] && grep -q "disable --now stenographr-phone.service" "$W/sysctl.log" && steno phone --remove | grep -q "not installed"'
 steno phone --tailscale > "$W/ts.out" 2>&1; echo $? > "$W/rc"

@@ -30,7 +30,7 @@ def install(config: str | None) -> int:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(
         "[Unit]\nDescription=stenographr phone notes (listens on 127.0.0.1 only)\n\n"
-        f"[Service]\nExecStart={os.path.abspath(exe)}{cfg} phone\nRestart=on-failure\n"
+        f"[Service]\nExecStart={os.path.abspath(exe)}{cfg} phone\nRestart=on-failure\nRestartSec=10\n"
         "Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin\n\n"
         "[Install]\nWantedBy=default.target\n", encoding="utf-8")
     for args in (("daemon-reload",), ("enable", "--now", UNIT)):
