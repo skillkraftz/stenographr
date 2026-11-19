@@ -164,6 +164,21 @@ rm "$F15"; start ""
 check "server start also backfills" '[[ -f $F15 ]]'
 stop
 
+# ---- Host / Origin check, worker niceness
+stop; fresh; start ""
+code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+check "Host: 127.0.0.1, localhost and a *.ts.net name are served" '[[ $(code $URL/api/notes) == 200 && $(code -H "Host: localhost:$PORT" $URL/api/notes) == 200 && $(code -H "Host: xps-1.tail9babd7.ts.net" $URL/api/notes) == 200 && $(code -H "Host: [::1]:$PORT" $URL/api/notes) == 200 ]]'
+check "Host: a rebinding name (evil.example, a lookalike of ts.net, an empty Host) is 403 on GET and POST" '[[ $(code -H "Host: evil.example:$PORT" $URL/) == 403 && $(code -H "Host: evil.ts.net.evil.example" $URL/api/notes) == 403 && $(code -H "Host: 192.168.1.5:$PORT" $URL/api/notes) == 403 && $(code -H "Host:" $URL/api/notes) == 403 && $(code -X POST -d x -H "Host: evil.example" -H "X-Note-Id: llllllll-0001" $URL/api/notes) == 403 ]] && [[ ! -e $A/phone/llllllll-0001.json ]]'
+check "Origin: same as Host passes, a cross-origin POST is 403 and saves nothing" '[[ $(code -X POST --data-binary "@$W/fx/android.webm" -H "Content-Type: audio/webm" -H "X-Note-Id: llllllll-0002" -H "Origin: https://evil.example" $URL/api/notes) == 403 && ! -e $A/phone/llllllll-0002.json && $(code -H "Origin: $URL" $URL/api/notes) == 200 && $(code -X POST --data-binary "@$W/fx/android.webm" -H "Content-Type: audio/webm" -H "X-Note-Id: llllllll-0003" -H "Origin: https://xps-1.tail9babd7.ts.net" -H "Host: xps-1.tail9babd7.ts.net" $URL/api/notes) == 200 ]]'
+check "the transcription worker thread runs at nice 10, the other threads (web handlers, main) at 0" '"$PY" - "$SPID" <<"PY"
+import glob, os, subprocess, sys
+pids = [sys.argv[1]] + subprocess.run(["pgrep", "-P", sys.argv[1]], capture_output=True, text=True).stdout.split()
+pid = next(p for p in pids if len(os.listdir(f"/proc/{p}/task")) > 1)      # the python server (threads), not a launcher shim
+n = {f: int(open(f).read().rsplit(")", 1)[1].split()[16]) for f in glob.glob(f"/proc/{pid}/task/*/stat")}
+assert list(n.values()).count(10) == 1 and n[f"/proc/{pid}/task/{pid}/stat"] == 0 and set(n.values()) == {0, 10}, n
+PY'
+stop
+
 # ---- phone --install / --remove / --tailscale
 export XDG_CONFIG_HOME=$W/xdg FAKE_SYSTEMCTL_LOG=$W/sysctl.log FAKE_TS_LOG=$W/ts.log; : > "$W/sysctl.log"; : > "$W/ts.log"
 steno phone --install > "$W/inst.out" 2>&1; echo $? > "$W/rc"

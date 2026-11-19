@@ -35,6 +35,7 @@ from .runner import Engines, transcribe_audio
 
 NAME = "phone"
 HOST = "127.0.0.1"
+NICE = 10                                                # the transcription worker yields to live dictation
 _ID = re.compile(r"^[A-Za-z0-9-]{8,64}$")
 _EXT = {"audio/webm": "webm", "video/webm": "webm", "audio/mp4": "m4a", "video/mp4": "m4a", "audio/x-m4a": "m4a",
         "audio/aac": "aac", "audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/x-wav": "wav"}
@@ -167,6 +168,10 @@ class Store:
     # ---- the worker
 
     def work(self) -> None:
+        try:
+            os.nice(NICE)       # Linux nice is per thread: only this thread (and the ffmpeg/engine threads it starts)
+        except OSError:         # is lowered; the web handlers and the rest of the process keep their priority
+            pass
         engines: Engines | None = None
         while True:
             nid = self.q.get()
@@ -229,6 +234,15 @@ class Store:
         self.log.info(nid, f"finish: {len(lines)} lines, {status}")
 
 
+def host_ok(host_header: str | None, origin: str | None) -> bool:
+    """Only this machine's own names and the tailnet's (a web page on the internet cannot reach the API through
+    the browser: DNS rebinding sends another Host), and an Origin, if sent, that is the Host (no cross-site POST)."""
+    host = (host_header or "").rsplit(":", 1)[0].strip("[]").lower()
+    if host not in ("127.0.0.1", "localhost", "::1") and not host.endswith(".ts.net"):
+        return False
+    return not origin or urllib.parse.urlsplit(origin).netloc.lower() == (host_header or "").lower()
+
+
 def make_handler(store: Store, max_bytes: int, version: str):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -255,7 +269,15 @@ def make_handler(store: Store, max_bytes: int, version: str):
         def _json(self, code: int, obj, close: bool = False) -> None:
             self._send(code, json.dumps(obj).encode(), "application/json", close)
 
+        def _allowed(self) -> bool:
+            if host_ok(self.headers.get("Host"), self.headers.get("Origin")):
+                return True
+            self._json(403, {"error": "forbidden host or origin"}, close=True)
+            return False
+
         def do_GET(self):
+            if not self._allowed():
+                return
             path = urllib.parse.urlsplit(self.path).path
             if path == "/":
                 html = phone_page.HTML.replace("/*NOTES*/[]", json.dumps(store.today()).replace("<", "\\u003c"))   # first paint has the list
@@ -272,6 +294,8 @@ def make_handler(store: Store, max_bytes: int, version: str):
                 self._json(404, {"error": "not found"})
 
         def do_POST(self):
+            if not self._allowed():
+                return
             if urllib.parse.urlsplit(self.path).path != "/api/notes":
                 return self._json(404, {"error": "not found"}, close=True)
             nid = self.headers.get("X-Note-Id", "")
@@ -313,7 +337,9 @@ def make_handler(store: Store, max_bytes: int, version: str):
                 return self._json(500, {"error": "could not save the audio"}, close=True)
             self._json(200, {"id": n["id"], "status": n["status"]})
 
-        def do_PUT(self): self._json(405, {"error": "method not allowed"}, close=True)
+        def do_PUT(self):
+            if self._allowed():
+                self._json(405, {"error": "method not allowed"}, close=True)
         do_DELETE = do_PATCH = do_PUT
 
     return Handler
